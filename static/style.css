@@ -1,0 +1,115 @@
+/* ---------------- Base Styles ---------------- */
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f6f7f9;
+    margin: 0;
+    padding: 0;
+    color: #111;
+}
+
+header {
+    text-align: center;
+    padding: 1rem 0;
+    background: linear-gradient(90deg, #3b82f6, #10b981);
+    color: white;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+}
+header h1 { font-size: 2rem; margin-bottom: 0.3rem; }
+header p { font-size: 1rem; opacity: 0.85; }
+
+nav.tabs { display:flex; justify-content:center; margin:1rem 0; gap:0.5rem; }
+nav.tabs .tab-btn { padding:0.6rem 1.2rem; border:none; cursor:pointer; font-weight:700; border-radius:8px; background-color:#cbd5e1; transition:0.25s; }
+nav.tabs .tab-btn.active { background: linear-gradient(45deg, #3b82f6, #10b981); color:white; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+
+.search-section { text-align:center; margin:1rem 0; }
+.search-section input { padding:0.5rem; width:200px; border-radius:5px; border:1px solid #ccc; }
+.search-section button { padding:0.4rem 0.6rem; border-radius:5px; border:none; background-color:#3b82f6; color:white; cursor:pointer; margin-left:0.3rem; }
+
+.hidden { display:none; }
+
+.results { display:flex; flex-wrap:wrap; justify-content:center; gap:1rem; }
+
+/* ---------------- User Cards ---------------- */
+.user-card {
+    width:160px;
+    background: linear-gradient(135deg, #ffffff, #f1f5f9);
+    border-radius:12px;
+    padding:0.7rem;
+    text-align:center;
+    box-shadow:0 4px 12px rgba(0,0,0,0.15);
+    cursor:pointer;
+    transition: transform 0.25s, box-shadow 0.25s;
+}
+.user-card:hover { transform: translateY(-5px); box-shadow:0 8px 20px rgba(0,0,0,0.25); }
+.user-card img.avatar-small { width:100px; height:100px; border-radius:50%; border:3px solid #3b82f6; box-shadow:0 4px 12px rgba(0,0,0,0.15); }
+.user-card h3, .modal-right h3 { word-break:break-word; white-space:normal; }
+
+/* ---------------- Badges ---------------- */
+.badge { font-size:0.7rem; padding:0.1rem 0.3rem; border-radius:4px; margin:2px; display:inline-block; transition: transform 0.2s, box-shadow 0.2s; }
+.badge:hover { transform: scale(1.05); box-shadow:0 0 6px rgba(0,0,0,0.2); }
+.badge-seed { background-color:#facc15; color:black; }
+.badge-new { background-color:#10b981; color:white; }
+.badge-star { background-color:#f97316; color:white; }
+.badge.shiny { background:linear-gradient(45deg,#f97316,#facc15,#f97316); background-size:200% 200%; animation:shine 2s linear infinite; color:white !important; font-weight:600; box-shadow:0 0 5px #facc15,0 0 10px #f97316; }
+/* ---------------- Developer Badge ---------------- */
+.badge-dev {
+    background: linear-gradient(45deg, #ef4444, #f87171, #ef4444); /* red gradient */
+    background-size: 200% 200%;
+    animation: shine 2s linear infinite; /* same shine animation as Star Creator */
+    color: white !important;
+    font-weight: 600;
+    box-shadow: 0 0 5px #f87171, 0 0 10px #ef4444;
+}
+@keyframes shine { 0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;} }
+
+/* ---------------- Modal ---------------- */
+.modal { display:none; position:fixed; z-index:100; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); justify-content:center; align-items:center; opacity:0; transition: opacity 0.25s ease; }
+.modal.show { display:flex; opacity:1; }
+.modal-content { background:white; width:500px; max-width:90%; display:flex; padding:1rem; border-radius:10px; gap:1rem; position:relative; transform: scale(0.9); transition: transform 0.25s ease; }
+.modal.show .modal-content { transform: scale(1); }
+.modal-left { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.modal-left img.avatar-large { width:150px; height:150px; border-radius:50%; border:4px solid #3b82f6; box-shadow:0 6px 20px rgba(0,0,0,0.25); }
+.modal-left .loading-text { font-weight:600; color:#3b82f6; font-size:1rem; }
+.modal-right { flex:2; font-size:0.95rem; }
+.modal-right h3 { margin:0; font-size:1.1rem; }
+.modal-right .profile-btn { display:inline-block; margin-top:0.5rem; padding:0.3rem 0.6rem; background-color:#3b82f6; color:white; text-decoration:none; border-radius:5px; }
+.modal-right .extra-info { word-break:break-word; white-space:normal; }
+.modal .close { position:absolute; right:10px; top:10px; font-size:1.2rem; cursor:pointer; }
+
+/* ---------------- Pagination ---------------- */
+.pagination { text-align:center; margin:1rem; }
+.pagination a, .pagination button { margin:0 0.2rem; padding:0.3rem 0.6rem; border-radius:4px; text-decoration:none; background-color:#cbd5e1; color:black; border:none; cursor:pointer; }
+.pagination a.active { background-color:#3b82f6; color:white; }
+
+/* ---------------- Settings Modal ---------------- */
+.settings-modal { position:fixed; top:100px; left:100px; width:220px; background-color:white; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.3); z-index:200; }
+.settings-header { font-weight:600; padding:0.5rem; background-color:#3b82f6; color:white; cursor:move; border-radius:8px 8px 0 0; display:flex; justify-content:space-between; align-items:center; }
+.settings-body { padding:0.5rem; display:flex; flex-direction:column; gap:0.5rem; }
+.settings-body button { padding:0.4rem; border-radius:5px; border:none; cursor:pointer; background-color:#f1f5f9; }
+
+/* ---------------- Dark Mode ---------------- */
+body.dark-mode { background-color:#111827; color:white; }
+body.dark-mode header { background-color:#1f2937; color:white; }
+body.dark-mode .user-card { background:#1f2937; color:white; box-shadow:0 2px 6px rgba(0,0,0,0.5); }
+body.dark-mode .badge-seed { background:#facc15; color:black; }
+body.dark-mode .badge-new { background:#10b981; color:white; }
+body.dark-mode .badge-star { background:#f97316; color:white; }
+body.dark-mode .modal-content { background-color:#1f2937; color:white; }
+body.dark-mode .modal-right .profile-btn { background-color:#3b82f6; color:white; }
+body.dark-mode .search-section input { background-color:#374151; color:white; border:1px solid #4b5563; }
+body.dark-mode .search-section button { background-color:#3b82f6; color:white; }
+body.dark-mode .pagination a, body.dark-mode .pagination button { background-color:#374151; color:white; border:1px solid #4b5563; }
+body.dark-mode .pagination a.active { background-color:#3b82f6; color:white; }
+body.dark-mode .settings-modal { background-color:#374151; color:white; }
+body.dark-mode .settings-header { background-color:#2563eb; color:white; }
+body.dark-mode .settings-body button { background-color:#1f2937; color:white; border:1px solid #4b5563; }
+
+/* ---------------- Home Page ---------------- */
+.home-main { display:flex; flex-direction:column; align-items:center; gap:3rem; padding:2rem 1rem; }
+.dev-card-section h2, .home-actions h2 { font-size:1.5rem; margin-bottom:1rem; text-align:center; color:#3b82f6; }
+.dev-card { background: linear-gradient(135deg, #ffffff, #f1f5f9); padding:1.5rem; border-radius:12px; text-align:center; box-shadow:0 6px 20px rgba(0,0,0,0.15); transition: transform 0.25s, box-shadow 0.25s; }
+.dev-card:hover { transform: translateY(-5px); box-shadow:0 10px 25px rgba(0,0,0,0.25); }
+.dev-card img.avatar-small { border:3px solid #3b82f6; box-shadow:0 4px 12px rgba(0,0,0,0.15); }
+.home-actions .home-buttons { display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; }
+.home-btn { padding:0.6rem 1.2rem; background: linear-gradient(45deg, #3b82f6, #10b981); color:white; text-decoration:none; border-radius:8px; font-weight:600; transition: transform 0.2s, box-shadow 0.2s; }
+.home-btn:hover { transform: translateY(-3px); box-shadow:0 6px 12px rgba(0,0,0,0.2); }

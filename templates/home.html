@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ROBLOX-Verified | Home</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* ---------------- Background ---------------- */
+body {
+    background: linear-gradient(135deg, #e0f2fe, #f0fdf4);
+    min-height: 100vh;
+}
+
+/* ---------------- Main Layout ---------------- */
+.home-main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2.5rem;
+    padding: 2rem 1rem;
+}
+
+/* ---------------- Developer Section ---------------- */
+.dev-card-container {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+/* ---------------- Action Cards ---------------- */
+.home-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+}
+.action-card {
+    width: 220px;
+    height: 120px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #3b82f6, #10b981);
+    color: white;
+    border-radius: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 0.25s, box-shadow 0.25s;
+}
+.action-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+}
+.action-card h3 { margin: 0.3rem 0; }
+.action-card p { font-size: 0.8rem; text-align: center; opacity: 0.9; }
+
+/* ---------------- Recent Activity ---------------- */
+.recent-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 1rem;
+}
+.user-card {
+    width: 160px;
+    background: linear-gradient(145deg, #ffffff, #e2e8f0);
+    border-radius: 12px;
+    padding: 0.7rem;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    cursor: default;
+}
+.user-card img.avatar-small {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    border: 3px solid #3b82f6;
+}
+.user-card h3 { font-size: 1rem; margin: 0.3rem 0; }
+.last-updated {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+</style>
+</head>
+<body>
+
+<header>
+    <h1>Welcome to ROBLOX-Verified</h1>
+    <p>Gamers Database Organiser & Verified Community Hub</p>
+</header>
+
+<main class="home-main">
+
+<!-- ---------------- Developer Section ---------------- -->
+<section class="dev-card-container">
+    <h2>Developer</h2>
+    <div class="dev-card user-card" id="devCard" data-uid="{{ DEV_UID }}">
+        <img src="" alt="Developer Avatar" class="avatar-small">
+        <h3>Loading...</h3>
+        <p><span class="badge badge-dev">Developer</span></p>
+    </div>
+</section>
+
+<!-- ---------------- Action Cards ---------------- -->
+<section class="home-actions">
+    <h2>Explore</h2>
+    <div class="home-buttons">
+        <a href="{{ url_for('index') }}?search_type=new" class="action-card">
+            <h3>Newly Added Users</h3>
+            <p>See the newest users added to the database</p>
+        </a>
+        <a href="{{ url_for('index') }}?search_type=seed" class="action-card">
+            <h3>Seed List</h3>
+            <p>View users from the Seed List</p>
+        </a>
+        <a href="{{ url_for('index') }}?search_type=individual" class="action-card">
+            <h3>Search Users</h3>
+            <p>Search for a user by username</p>
+        </a>
+    </div>
+</section>
+
+<!-- ---------------- Recent Activity ---------------- -->
+<section class="recent-activity">
+    <h2>Recent Activity</h2>
+    <div class="recent-grid" id="recentGrid"></div>
+    <p class="last-updated">Last updated: {{ last_updated }}</p>
+</section>
+
+</main>
+
+<footer>
+<p>ROBLOX-Verified &copy; 2026</p>
+</footer>
+
+<script>
+// ---------------- Developer Card ----------------
+const DEV_UID = "{{ DEV_UID }}";
+function setupDevCard() {
+    const card = document.getElementById("devCard");
+    const avatarSmall = card.querySelector(".avatar-small");
+    const usernameH3 = card.querySelector("h3");
+
+    fetch(`/user/${DEV_UID}`)
+        .then(res => res.json())
+        .then(data => {
+            if (!data) return;
+            avatarSmall.src = data.avatar_url || "";
+            usernameH3.innerText = data.stored.username || "Developer";
+        })
+        .catch(err => {
+            console.error("Error loading developer card:", err);
+            usernameH3.innerText = "Developer";
+        });
+}
+
+// ---------------- Recent Activity ----------------
+function loadRecentActivity() {
+    const grid = document.getElementById("recentGrid");
+    grid.innerHTML = ""; // clear old cards
+
+    fetch("/api/recent_activity")
+        .then(res => res.json())
+        .then(users => {
+            users.forEach(u => {
+                const card = document.createElement("div");
+                card.classList.add("user-card");
+                card.style.cursor = "default"; // non-clickable
+                card.innerHTML = `
+                    <img src="${u.avatar_url}&type=AvatarHeadshot" alt="${u.username}" class="avatar-small">
+                    <h3>${u.username}</h3>
+                    <p>
+                        <span class="badge badge-new">Newly Added</span>
+                        ${u.is_star_creator ? '<span class="badge badge-star shiny">Star Creator</span>' : ''}
+                    </p>
+                `;
+                grid.appendChild(card);
+            });
+        })
+        .catch(err => console.error("Error loading recent activity:", err));
+}
+
+// ---------------- Init ----------------
+document.addEventListener("DOMContentLoaded", () => {
+    setupDevCard();
+    loadRecentActivity();
+});
+</script>
+
+</body>
+</html>

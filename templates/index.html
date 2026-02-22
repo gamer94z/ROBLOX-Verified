@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ROBLOX-Verified</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+    <h1>ROBLOX-Verified</h1>
+    <p>Gamers Database Organiser</p>
+</header>
+
+<nav class="tabs">
+    <button class="tab-btn {% if search_type=='new' %}active{% endif %}" data-type="new">Newly Added</button>
+    <button class="tab-btn {% if search_type=='seed' %}active{% endif %}" data-type="seed">Seed List</button>
+    <button class="tab-btn {% if search_type=='individual' %}active{% endif %}" data-type="individual">Individual</button>
+    <button class="tab-btn" data-type="settings">Settings</button>
+</nav>
+
+<main>
+<section class="search-section {% if search_type!='individual' %}hidden{% endif %}">
+    <form method="get" id="searchForm">
+        <input type="text" id="searchInput" name="query" placeholder="Search username" value="{{ query }}">
+        <button type="submit">Go</button>
+    </form>
+</section>
+
+<section class="results">
+    {% for uid, info in results.items() %}
+    <div class="user-card" data-uid="{{ uid }}">
+        <img class="avatar-small" alt="Avatar" loading="lazy">
+        <h3>{{ info.username }} ({{ uid }})</h3>
+        <p class="source">
+            {% if info.source=='Seed List' %}
+            <span class="badge badge-seed">{{ info.source }}</span>
+            {% else %}
+            <span class="badge badge-new">Newly Added</span>
+            {% endif %}
+            <span class="badge badge-star shiny" style="display:none;">Star Creator</span>
+        </p>
+    </div>
+
+    <div id="modal-{{uid}}" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div class="modal-left">
+                <div class="loading-text">Loading Data:</div>
+                <img class="avatar-large fade-in" style="display:none;" alt="Avatar">
+            </div>
+            <div class="modal-right">
+                <h3></h3>
+                <p></p>
+                <div class="extra-info"></div>
+                <a class="profile-btn" href="#" target="_blank">Open Profile</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</section>
+
+<div class="pagination">
+    <a href="?page=1&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}" class="{% if page==1 %}active{% endif %}">1</a>
+
+    {% set window = 2 %}
+    {% set start_page = page - window %}
+    {% set end_page = page + window %}
+    {% if start_page < 2 %}{% set start_page = 2 %}{% endif %}
+    {% if end_page > total_pages -1 %}{% set end_page = total_pages -1 %}{% endif %}
+
+    {% if start_page > 2 %}<span>...</span>{% endif %}
+    {% for p in range(start_page, end_page + 1) %}
+    <a href="?page={{p}}&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}" class="{% if p==page %}active{% endif %}">{{p}}</a>
+    {% endfor %}
+    {% if end_page < total_pages -1 %}<span>...</span>{% endif %}
+    {% if total_pages > 1 %}
+    <a href="?page={{total_pages}}&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}" class="{% if page==total_pages %}active{% endif %}">{{total_pages}}</a>
+    {% endif %}
+
+    <input type="number" id="jumpPage" min="1" max="{{total_pages}}" placeholder="Page">
+    <button type="button" id="jumpPageBtn">Go</button>
+
+    {% if page < total_pages %}
+    <a href="?page={{page+1}}&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}">Next &raquo;</a>
+    {% endif %}
+</div>
+
+<footer>
+<p>ROBLOX-Verified &copy; 2026</p>
+</footer>
+
+<div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-header">Settings <span id="closeSettings">&times;</span></div>
+    <div class="settings-body">
+        <button id="lightModeBtn">Light Mode</button>
+        <button id="darkModeBtn">Dark Mode</button>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
