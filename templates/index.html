@@ -16,18 +16,56 @@
 <nav class="tabs">
     <button class="tab-btn {% if search_type=='new' %}active{% endif %}" data-type="new">Newly Added</button>
     <button class="tab-btn {% if search_type=='seed' %}active{% endif %}" data-type="seed">Seed List</button>
+    <button class="tab-btn {% if search_type=='database' %}active{% endif %}" data-type="database">Database</button>
     <button class="tab-btn {% if search_type=='individual' %}active{% endif %}" data-type="individual">Individual</button>
     <button class="tab-btn" data-type="settings">Settings</button>
 </nav>
 
 <main>
+
+<!-- Search section for individual -->
 <section class="search-section {% if search_type!='individual' %}hidden{% endif %}">
     <form method="get" id="searchForm">
         <input type="text" id="searchInput" name="query" placeholder="Search username" value="{{ query }}">
+        <input type="hidden" name="search_type" value="individual">
         <button type="submit">Go</button>
     </form>
 </section>
 
+<!-- Database filters: only show on database page -->
+{% if search_type=='database' %}
+<section class="filter-section">
+    <form method="get" id="filterForm" class="filter-form">
+        <input type="hidden" name="search_type" value="database">
+
+        <div class="filter-options">
+            <label>
+                <input type="checkbox" name="length3" {% if request.args.get('length3') %}checked{% endif %}>
+                3-character names
+            </label>
+            <label>
+                <input type="checkbox" name="length4" {% if request.args.get('length4') %}checked{% endif %}>
+                4-character names
+            </label>
+            <label>
+                <input type="checkbox" name="length5" {% if request.args.get('length5') %}checked{% endif %}>
+                5-character names
+            </label>
+            <label>
+                <input type="checkbox" name="letters_only" {% if request.args.get('letters_only') %}checked{% endif %}>
+                Letters only
+            </label>
+        </div>
+
+        <button type="submit" class="apply-filters-btn">Apply Filters</button>
+    </form>
+</section>
+{% endif %}
+
+<!-- Total users display -->
+<p style="text-align:center; font-weight:600;">{{ total_label }}</p>
+
+<!-- User cards -->
 <section class="results">
     {% for uid, info in results.items() %}
     <div class="user-card" data-uid="{{ uid }}">
@@ -61,30 +99,50 @@
     {% endfor %}
 </section>
 
+<!-- Pagination -->
 <div class="pagination">
-    <a href="?page=1&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}" class="{% if page==1 %}active{% endif %}">1</a>
+
+    {% set filters = "" %}
+    {% if search_type == 'database' %}
+        {% if request.args.get('length3') %}{% set filters = filters + "&length3=on" %}{% endif %}
+        {% if request.args.get('length4') %}{% set filters = filters + "&length4=on" %}{% endif %}
+        {% if request.args.get('length5') %}{% set filters = filters + "&length5=on" %}{% endif %}
+        {% if request.args.get('letters_only') %}{% set filters = filters + "&letters_only=on" %}{% endif %}
+    {% endif %}
+    {% if search_type=='individual' and query %}
+        {% set filters = filters + "&query=" + query %}
+    {% endif %}
+
+    <!-- First page always -->
+    <a href="?page=1&search_type={{search_type}}{{ filters }}" class="{% if page==1 %}active{% endif %}">1</a>
 
     {% set window = 2 %}
     {% set start_page = page - window %}
     {% set end_page = page + window %}
+
     {% if start_page < 2 %}{% set start_page = 2 %}{% endif %}
     {% if end_page > total_pages -1 %}{% set end_page = total_pages -1 %}{% endif %}
 
     {% if start_page > 2 %}<span>...</span>{% endif %}
-    {% for p in range(start_page, end_page + 1) %}
-    <a href="?page={{p}}&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}" class="{% if p==page %}active{% endif %}">{{p}}</a>
+
+    {% for p in range(start_page, end_page +1) %}
+        <a href="?page={{p}}&search_type={{search_type}}{{ filters }}" class="{% if p==page %}active{% endif %}">{{p}}</a>
     {% endfor %}
+
     {% if end_page < total_pages -1 %}<span>...</span>{% endif %}
+
     {% if total_pages > 1 %}
-    <a href="?page={{total_pages}}&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}" class="{% if page==total_pages %}active{% endif %}">{{total_pages}}</a>
+        <a href="?page={{total_pages}}&search_type={{search_type}}{{ filters }}" class="{% if page==total_pages %}active{% endif %}">{{total_pages}}</a>
     {% endif %}
 
+    <!-- Jump To Page -->
     <input type="number" id="jumpPage" min="1" max="{{total_pages}}" placeholder="Page">
     <button type="button" id="jumpPageBtn">Go</button>
 
     {% if page < total_pages %}
-    <a href="?page={{page+1}}&search_type={{search_type}}{% if search_type=='individual' %}&query={{query}}{% endif %}">Next &raquo;</a>
+        <a href="?page={{page+1}}&search_type={{search_type}}{{ filters }}">Next &raquo;</a>
     {% endif %}
+
 </div>
 
 <footer>
@@ -98,6 +156,27 @@
         <button id="darkModeBtn">Dark Mode</button>
     </div>
 </div>
+
+<script>
+// Jump page functionality keeping filters
+document.getElementById("jumpPageBtn").addEventListener("click", function() {
+    const page = document.getElementById("jumpPage").value;
+    if (!page) return;
+
+    let url = new URL(window.location.href);
+    url.searchParams.set("page", page);
+
+    // Preserve filters and query
+    {% for key in ['length3','length4','length5','letters_only','query'] %}
+        {% if request.args.get(key) %}
+            url.searchParams.set("{{ key }}", "{{ request.args.get(key) }}");
+        {% endif %}
+    {% endfor %}
+
+    url.searchParams.set("search_type", "{{ search_type }}");
+    window.location.href = url.toString();
+});
+</script>
 
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>

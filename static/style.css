@@ -113,3 +113,39 @@ body.dark-mode .settings-body button { background-color:#1f2937; color:white; bo
 .home-actions .home-buttons { display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; }
 .home-btn { padding:0.6rem 1.2rem; background: linear-gradient(45deg, #3b82f6, #10b981); color:white; text-decoration:none; border-radius:8px; font-weight:600; transition: transform 0.2s, box-shadow 0.2s; }
 .home-btn:hover { transform: translateY(-3px); box-shadow:0 6px 12px rgba(0,0,0,0.2); }
+
+/* ---------------- Database Filters ---------------- */
+.filter-section {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.filter-section form {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.filter-section label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.filter-section button {
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.filter-section button:hover {
+    background-color: #3b82f6;
+}

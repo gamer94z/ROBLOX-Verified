@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ROBLOX-Verified Database</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+    <h1>ROBLOX-Verified</h1>
+    <p>Gamers Database Organiser</p>
+</header>
+
+<nav class="tabs">
+    <button class="tab-btn {% if search_type=='database' %}active{% endif %}" data-type="database">Database</button>
+    <button class="tab-btn" data-type="settings">Settings</button>
+</nav>
+
+<main>
+<section class="search-section">
+    <form method="get" id="filterForm">
+        <label for="length">Name Length:</label>
+        <select name="length" id="length">
+            <option value="">Any</option>
+            <option value="3" {% if filters.length == '3' %}selected{% endif %}>3 Characters</option>
+            <option value="4" {% if filters.length == '4' %}selected{% endif %}>4 Characters</option>
+            <option value="5" {% if filters.length == '5' %}selected{% endif %}>5 Characters</option>
+        </select>
+
+        <label>
+            <input type="checkbox" name="letters_only" value="1" {% if filters.letters_only %}checked{% endif %}>
+            Letters Only
+        </label>
+
+        <button type="submit">Apply Filter</button>
+    </form>
+</section>
+
+<section class="results">
+    {% for uid, info in users %}
+    <div class="user-card" data-uid="{{ uid }}">
+        <img class="avatar-small" alt="Avatar" loading="lazy">
+        <h3>{{ info.username }} ({{ uid }})</h3>
+        <p class="source">
+            {% if info.source=='Seed List' %}
+            <span class="badge badge-seed">{{ info.source }}</span>
+            {% else %}
+            <span class="badge badge-new">Newly Added</span>
+            {% endif %}
+            <span class="badge badge-star shiny" style="display:none;">Star Creator</span>
+        </p>
+    </div>
+
+    <div id="modal-{{uid}}" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div class="modal-left">
+                <div class="loading-text">Loading Data:</div>
+                <img class="avatar-large fade-in" style="display:none;" alt="Avatar">
+            </div>
+            <div class="modal-right">
+                <h3></h3>
+                <p></p>
+                <div class="extra-info"></div>
+                <a class="profile-btn" href="#" target="_blank">Open Profile</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</section>
+
+<div class="pagination">
+    <span>Total Users: {{ total_users }}</span>
+</div>
+
+<footer>
+<p>ROBLOX-Verified &copy; 2026</p>
+</footer>
+
+<div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-header">Settings <span id="closeSettings">&times;</span></div>
+    <div class="settings-body">
+        <button id="lightModeBtn">Light Mode</button>
+        <button id="darkModeBtn">Dark Mode</button>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

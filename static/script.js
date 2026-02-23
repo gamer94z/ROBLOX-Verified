@@ -64,10 +64,20 @@ searchSelect.forEach(btn => {
     btn.addEventListener("click", () => {
         const type = btn.dataset.type;
         if (type === "settings") return;
+
         const url = new URL(window.location.href);
+
+        // Set search_type explicitly to the tab clicked
         url.searchParams.set("search_type", type);
-        if (type !== "individual") url.searchParams.delete("query");
+
+        // Reset page
         url.searchParams.set("page", 1);
+
+        // Clear query only when switching away from individual
+        if (type !== "individual") {
+            url.searchParams.delete("query");
+        }
+
         window.location.href = url.toString();
     });
 });

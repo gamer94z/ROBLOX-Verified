@@ -28,7 +28,7 @@ def insert_user(uid, username, source):
 def get_all_users():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT id, username, source FROM users")
+    c.execute("SELECT user_id, username, status FROM users")
     rows = c.fetchall()
     conn.close()
     return {row[0]: {"username": row[1], "source": row[2]} for row in rows}
@@ -36,7 +36,7 @@ def get_all_users():
 def get_user(uid):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT username, source FROM users WHERE id=?", (uid,))
+    c.execute("SELECT username, status FROM users WHERE user_id=?", (uid,))
     row = c.fetchone()
     conn.close()
     if row:

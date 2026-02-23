@@ -3,7 +3,7 @@ import datetime
 import requests
 import math
 import time
-from database import init_db, get_all_users, get_user  # your existing DB functions
+from database import init_db, get_all_users, get_user
 
 app = Flask(__name__)
 
@@ -16,10 +16,10 @@ BASE_USERS = "https://users.roblox.com/v1/users"
 BASE_FRIENDS = "https://friends.roblox.com/v1/users"
 VIDEO_STARS_GROUP_ID = 4199740
 USERS_PER_PAGE = 30
-CACHE_EXPIRY = 3600  # 1 hour cache
+CACHE_EXPIRY = 3600
 DEV_UID = "10006170169"
 
-user_cache = {}  # store live Roblox data to avoid repeated requests
+user_cache = {}
 
 # ---------------- Helper: fetch live user data ----------------
 def fetch_user_data(uid):
@@ -42,7 +42,10 @@ def fetch_user_data(uid):
             d = r.json()
             join_date = d.get("created")
             if join_date:
-                join_date = datetime.datetime.fromisoformat(join_date.replace("Z", "")).strftime("%Y-%m-%d")
+                join_date = datetime.datetime.fromisoformat(
+                    join_date.replace("Z", "")
+                ).strftime("%Y-%m-%d")
+
             live = {
                 "username": d.get("name"),
                 "displayName": d.get("displayName"),
@@ -100,14 +103,12 @@ def fetch_user_data(uid):
 
 # ---------------- Routes ----------------
 
-# Home / landing page
 @app.route("/")
 @app.route("/home")
 def home():
     last_updated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     return render_template("home.html", last_updated=last_updated, DEV_UID=DEV_UID)
 
-# User listing / index page
 @app.route("/index")
 def index():
     search_type = request.args.get("search_type", "new")
@@ -118,14 +119,51 @@ def index():
     except:
         page = 1
 
-    filtered = {}
+    db = get_all_users()  # refresh live DB
 
+    # ---------------- Filter users ----------------
     if search_type == "new":
         filtered = {uid: info for uid, info in db.items() if info["source"] != "Seed List"}
+        total_label = f"Total New Users: {len(filtered)}"
+
     elif search_type == "seed":
         filtered = {uid: info for uid, info in db.items() if info["source"] == "Seed List"}
-    elif search_type == "individual" and query:
-        filtered = {uid: info for uid, info in db.items() if query in info["username"].lower()}
+        total_label = f"Total Seed Users: {len(filtered)}"
+
+    elif search_type == "database":
+        filtered = db
+
+        # --- Database filters ---
+        length3 = request.args.get("length3")
+        length4 = request.args.get("length4")
+        length5 = request.args.get("length5")
+        letters_only = request.args.get("letters_only")
+
+        lengths = []
+        if length3: lengths.append(3)
+        if length4: lengths.append(4)
+        if length5: lengths.append(5)
+
+        if lengths:
+            filtered = {uid: info for uid, info in filtered.items()
+                        if len(info["username"]) in lengths}
+
+        if letters_only:
+            filtered = {uid: info for uid, info in filtered.items()
+                        if info["username"].isalpha()}
+
+        total_label = f"Total Users: {len(filtered)}"
+
+    elif search_type == "individual":
+        if query:
+            filtered = {uid: info for uid, info in db.items() if query in info["username"].lower()}
+        else:
+            filtered = {}  # No cards shown by default
+        total_label = f"Total Results: {len(filtered)}"
+
+    else:
+        filtered = {}
+        total_label = ""
 
     total_pages = math.ceil(len(filtered) / USERS_PER_PAGE)
     start = (page - 1) * USERS_PER_PAGE
@@ -139,39 +177,57 @@ def index():
         query=query,
         page=page,
         total_pages=total_pages,
+        total_label=total_label
     )
 
-# ---------------- Full user info for modal ----------------
+@app.route("/database")
+def database_page():
+    db = get_all_users()
+
+    # Get filters from query string
+    length = request.args.get("length", "").strip()
+    letters_only = request.args.get("letters_only", "") == "1"
+
+    # Apply filters
+    filtered = {}
+    for uid, info in db.items():
+        username = info["username"]
+        if length and len(username) != int(length):
+            continue
+        if letters_only and not username.isalpha():
+            continue
+        filtered[uid] = info
+
+    # Pagination
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except:
+        page = 1
+
+    total_users = len(filtered)
+    total_pages = math.ceil(total_users / USERS_PER_PAGE)
+    start = (page - 1) * USERS_PER_PAGE
+    end = start + USERS_PER_PAGE
+    page_items = list(filtered.items())[start:end]
+
+    # Pass filter values back to template to keep selections
+    filters = {
+        "length": length,
+        "letters_only": letters_only
+    }
+
+    return render_template(
+        "database.html",
+        users=page_items,
+        total_users=total_users,
+        total_pages=total_pages,
+        page=page,
+        filters=filters
+    )
+
 @app.route("/user/<int:uid>")
 def user_info(uid):
     stored = get_user(uid)
-
-    # Developer fallback
-    if not stored and str(uid) == DEV_UID:
-        try:
-            r = requests.get(f"{BASE_USERS}/{uid}", timeout=5).json()
-            join_date = r.get("created")
-            if join_date:
-                join_date = datetime.datetime.fromisoformat(join_date.replace("Z","")).strftime("%Y-%m-%d")
-            stored = {"username": r.get("name"), "source": "Developer"}
-
-            avatar_req = requests.get(
-                f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={uid}&size=150x150&format=Png&isCircular=true",
-                timeout=5
-            ).json()
-            avatar_url = avatar_req["data"][0]["imageUrl"]
-
-            live_data = {
-                "live": {"displayName": r.get("displayName"), "joined": join_date},
-                "stats": {"friends":0, "followers":0, "following":0},
-                "avatar_url": avatar_url,
-                "is_star_creator": False,
-                "profile_url": f"https://www.roblox.com/users/{uid}/profile"
-            }
-            return jsonify({"stored": stored, **live_data})
-        except Exception as e:
-            print("Developer fetch error:", e)
-            return jsonify({"error": "Developer info fetch failed"}), 500
 
     if not stored:
         return jsonify({"error": "User not found"}), 404
@@ -179,46 +235,46 @@ def user_info(uid):
     live_data = fetch_user_data(uid)
     return jsonify({"stored": stored, **live_data})
 
-# ---------------- Batch avatar fetch ----------------
 @app.route("/users_batch")
 def users_batch():
     uids = request.args.get("uids", "").split(",")
     valid_uids = [uid for uid in uids if uid.isdigit()]
-    if not valid_uids: return jsonify({})
+    if not valid_uids:
+        return jsonify({})
 
     url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={','.join(valid_uids)}&size=150x150&format=Png&isCircular=true"
     avatar_data = {}
+
     try:
         r = requests.get(url, timeout=5)
         if r.status_code == 200:
             for entry in r.json().get("data", []):
                 avatar_data[str(entry["targetId"])] = entry.get("imageUrl", "")
-    except: pass
+    except:
+        pass
 
     response = {}
     for uid in valid_uids:
-        response[uid] = {"avatar_url": avatar_data.get(uid, ""), "is_star_creator": False}
+        response[uid] = {
+            "avatar_url": avatar_data.get(uid, ""),
+            "is_star_creator": False
+        }
+
     return jsonify(response)
 
-# ---------------- Recent Activity API ----------------
 @app.route("/api/recent_activity")
 def recent_activity():
-    # Only include users marked as "Newly Added"
-    new_users = [(uid, user) for uid, user in db.items() if user["source"] != "Seed List"]
-
-    # Sort by the timestamp they were added, newest first
-    new_users_sorted = sorted(new_users, key=lambda x: x[1].get("added_timestamp", 0), reverse=True)
-
-    # Limit to 5 users
+    db = get_all_users()
+    new_users = [(uid, user) for uid, user in db.items() if user.get("source") != "Seed List"]
+    new_users_sorted = sorted(new_users, key=lambda x: x[0], reverse=True)
     recent = new_users_sorted[:5]
 
-    # Include avatar URL and star creator status from cache/live data
     result = []
     for uid, u in recent:
-        data = fetch_user_data(uid)  # ensures avatar_url and is_star_creator
+        data = fetch_user_data(uid)
         result.append({
             "uid": uid,
-            "username": u["username"],
+            "username": u.get("username"),
             "avatar_url": data.get("avatar_url", ""),
             "is_star_creator": data.get("is_star_creator", False)
         })
