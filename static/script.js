@@ -554,7 +554,7 @@ batchFetchAvatars();
 // ---------------- Live Sync Status + Auto Refresh ----------------
 async function pollLiveStatus() {
     try {
-        const res = await fetch("/api/live_status");
+        const res = await fetch(`/api/live_status?t=${Date.now()}`, { cache: "no-store" });
         if (!res.ok) return;
         const status = await res.json();
 

@@ -1112,6 +1112,9 @@ def api_admin_bought_tag():
 
     if not set_bought_tag(uid, enabled):
         return jsonify({"error": "User not found"}), 404
+    # Bump shared freshness marker so all connected clients reload data across workers.
+    auto_sync_state["last_success_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
     log_monitor_event(
         "warn" if enabled else "info",
         "Bought tag updated",
@@ -1400,6 +1403,7 @@ def recent_bought():
 @app.route("/api/live_status")
 def live_status():
     global last_seen_db_mtime
+    hydrate_auto_sync_state_from_db()
     db = get_all_users()
     total = len(db)
     seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
@@ -1428,7 +1432,7 @@ def live_status():
         )
         last_seen_db_mtime = db_mtime
 
-    return jsonify(
+    resp = jsonify(
         {
             "database_mode": "Auto Collecting",
             "total_users": total,
@@ -1438,6 +1442,11 @@ def live_status():
             "db_updated_at": datetime.datetime.fromtimestamp(db_mtime).strftime("%Y-%m-%d %H:%M:%S"),
         }
     )
+    # Prevent intermediary/browser caching so clients always see fresh cross-user updates.
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route("/api/collector_monitor")
