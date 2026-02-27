@@ -1,6 +1,13 @@
 import sqlite3
+import os
 
-DB_NAME = "verified_users.db"
+DB_NAME = os.environ.get("DB_PATH", "verified_users.db")
+
+
+def _ensure_parent_dir(path):
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
 
 def _get_table_columns(conn, table_name):
@@ -95,6 +102,7 @@ def _migrate_users_table_if_needed(conn):
 
 
 def init_db():
+    _ensure_parent_dir(DB_NAME)
     conn = sqlite3.connect(DB_NAME)
     try:
         _migrate_users_table_if_needed(conn)

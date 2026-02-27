@@ -8,7 +8,7 @@ import logging
 import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from database import init_db, get_all_users, get_user, set_bought_tag, get_bought_tags
+from database import init_db, get_all_users, get_user, set_bought_tag, get_bought_tags, DB_NAME
 from update_db import parse_verified_users_file, sync_database, TXT_FILE
 
 app = Flask(__name__)
@@ -953,7 +953,7 @@ def live_status():
     new_total = total - seed_total
 
     try:
-        db_mtime = int(os.path.getmtime("verified_users.db"))
+        db_mtime = int(os.path.getmtime(DB_NAME))
     except OSError:
         db_mtime = int(time.time())
 

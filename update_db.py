@@ -1,10 +1,10 @@
 import re
 import sqlite3
 import time
-from database import init_db
+from database import init_db, DB_NAME
 
 TXT_FILE = "verified_users.txt"
-DB_FILE = "verified_users.db"
+DB_FILE = DB_NAME
 PROMOTION_SECONDS = 14 * 24 * 60 * 60
 
 HEADER_MARKERS = (
@@ -146,4 +146,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

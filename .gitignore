@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Local runtime state (do not commit)
+verified_users.db
+verified_users.txt
