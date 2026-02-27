@@ -209,7 +209,48 @@ function batchFetchAvatars() {
     const uids = Array.from(document.querySelectorAll(".user-card")).map(c => c.dataset.uid);
     if (uids.length === 0) return;
     const total = uids.length;
-    updatePageLoadUI("Loading user metadata...", 0, total);
+    updatePageLoadUI("Loading avatars...", 0, total);
+
+    const showStarBadge = (uid) => {
+        const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
+        const starBadge = card?.querySelector(".badge-star");
+        if (starBadge) starBadge.style.display = "inline-block";
+        if (userDataCache[uid]) userDataCache[uid].is_star_creator = true;
+    };
+    const showTerminatedBadge = (uid) => {
+        const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
+        const ribbon = card?.querySelector(".banned-ribbon");
+        if (ribbon) ribbon.style.display = "block";
+        if (userDataCache[uid]) userDataCache[uid].is_terminated = true;
+    };
+    const fetchStarsFor = (targetUids) => {
+        if (!targetUids.length) return;
+        fetch(`/stars_batch?uids=${targetUids.join(",")}`)
+            .then(r => r.json())
+            .then(stars => {
+                if (runId !== batchLoadRunId) return;
+                for (const uid in stars) {
+                    if (stars[uid]) showStarBadge(uid);
+                }
+            })
+            .catch(() => {});
+    };
+    const fetchTerminatedFor = (targetUids, forceRefresh = false) => {
+        if (!targetUids.length) return;
+        fetch(`/terminated_batch?uids=${targetUids.join(",")}&force=${forceRefresh ? "1" : "0"}`)
+            .then(r => r.json())
+            .then(terminated => {
+                if (runId !== batchLoadRunId) return;
+                for (const uid in terminated) {
+                    if (terminated[uid]) showTerminatedBadge(uid);
+                }
+            })
+            .catch(() => {});
+    };
+
+    // Start badge checks immediately, in parallel with users_batch.
+    fetchStarsFor(uids);
+    fetchTerminatedFor(uids, false);
 
     fetch(`/users_batch?uids=${uids.join(",")}`)
         .then(r => r.json())
@@ -219,56 +260,24 @@ function batchFetchAvatars() {
             let processed = 0;
             const ordered = uids.map(uid => [uid, data[uid] || {}]);
 
-            // Populate star badges asynchronously without delaying card/avatar rendering.
-            fetch(`/stars_batch?uids=${uids.join(",")}`)
-                .then(r => r.json())
-                .then(stars => {
-                    if (runId !== batchLoadRunId) return;
-                    for (const uid in stars) {
-                        if (!stars[uid]) continue;
-                        const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
-                        const starBadge = card?.querySelector(".badge-star");
-                        if (starBadge) starBadge.style.display = "inline-block";
-                        if (userDataCache[uid]) userDataCache[uid].is_star_creator = true;
-                    }
-                })
-                .catch(() => {});
-
-            // Reliability pass for termination ribbons to avoid occasional misses.
-            fetch(`/terminated_batch?uids=${uids.join(",")}`)
-                .then(r => r.json())
-                .then(terminated => {
-                    if (runId !== batchLoadRunId) return;
-                    for (const uid in terminated) {
-                        if (!terminated[uid]) continue;
-                        const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
-                        const ribbon = card?.querySelector(".banned-ribbon");
-                        if (ribbon) ribbon.style.display = "block";
-                        if (userDataCache[uid]) userDataCache[uid].is_terminated = true;
-                    }
-                })
-                .catch(() => {});
-
-            // Secondary verification shortly after first pass for occasional API lag.
+            // Retry passes to avoid needing a manual refresh after transient API misses.
             setTimeout(() => {
                 if (runId !== batchLoadRunId) return;
-                fetch(`/terminated_batch?uids=${uids.join(",")}`)
-                    .then(r => r.json())
-                    .then(terminated => {
-                        if (runId !== batchLoadRunId) return;
-                        for (const uid in terminated) {
-                            if (!terminated[uid]) continue;
-                            const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
-                            const ribbon = card?.querySelector(".banned-ribbon");
-                            if (ribbon) ribbon.style.display = "block";
-                            if (userDataCache[uid]) userDataCache[uid].is_terminated = true;
-                        }
-                    })
-                    .catch(() => {});
-            }, 1200);
+                const unresolvedStars = uids.filter(uid => !(userDataCache[uid] && userDataCache[uid].is_star_creator));
+                const unresolvedTerminated = uids.filter(uid => !(userDataCache[uid] && userDataCache[uid].is_terminated));
+                fetchStarsFor(unresolvedStars);
+                fetchTerminatedFor(unresolvedTerminated, true);
+            }, 500);
+            setTimeout(() => {
+                if (runId !== batchLoadRunId) return;
+                const unresolvedStars = uids.filter(uid => !(userDataCache[uid] && userDataCache[uid].is_star_creator));
+                const unresolvedTerminated = uids.filter(uid => !(userDataCache[uid] && userDataCache[uid].is_terminated));
+                fetchStarsFor(unresolvedStars);
+                fetchTerminatedFor(unresolvedTerminated, true);
+            }, 1400);
 
-            const loadTasks = ordered.map(([uid, payload]) => new Promise(resolve => {
-                if (runId !== batchLoadRunId) return resolve();
+            for (const [uid, payload] of ordered) {
+                if (runId !== batchLoadRunId) return;
 
                 const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
                 userDataCache[uid] = {
@@ -279,9 +288,9 @@ function batchFetchAvatars() {
                 };
 
                 if (card && payload.is_terminated) {
-                    const bannedRibbon = card.querySelector(".banned-ribbon");
-                    if (bannedRibbon) bannedRibbon.style.display = "block";
+                    showTerminatedBadge(uid);
                 }
+                if (card && payload.is_star_creator) showStarBadge(uid);
 
                 if (card && payload.is_bought) {
                     let boughtBadge = card.querySelector(".badge-bought");
@@ -294,25 +303,38 @@ function batchFetchAvatars() {
                     }
                 }
 
-                const finalizeOne = (img) => {
-                    if (runId !== batchLoadRunId) return resolve();
-                    markAvatarLoaded(img);
-                    processed += 1;
-                    updatePageLoadUI("Loading users...", processed, total);
-                    resolve();
-                };
+                const finalizeOne = (img) =>
+                    new Promise(done => {
+                        if (runId !== batchLoadRunId) return done();
+                        markAvatarLoaded(img);
+                        processed += 1;
+                        updatePageLoadUI("Loading users...", processed, total);
+                        done();
+                    });
 
-                if (!card) return finalizeOne(null);
+                if (!card) {
+                    await finalizeOne(null);
+                    continue;
+                }
                 const img = card.querySelector(".avatar-small");
-                if (!img) return finalizeOne(null);
+                if (!img) {
+                    await finalizeOne(null);
+                    continue;
+                }
 
-                installAvatarFallback(img);
-                img.addEventListener("load", () => finalizeOne(img), { once: true });
-                img.addEventListener("error", () => finalizeOne(img), { once: true });
-                img.src = payload.avatar_url || AVATAR_PLACEHOLDER;
-            }));
-
-            await Promise.allSettled(loadTasks);
+                await new Promise(done => {
+                    installAvatarFallback(img);
+                    img.addEventListener("load", async () => {
+                        await finalizeOne(img);
+                        done();
+                    }, { once: true });
+                    img.addEventListener("error", async () => {
+                        await finalizeOne(img);
+                        done();
+                    }, { once: true });
+                    img.src = payload.avatar_url || AVATAR_PLACEHOLDER;
+                });
+            }
             if (runId !== batchLoadRunId) return;
             updatePageLoadUI("Users ready", total, total);
         })

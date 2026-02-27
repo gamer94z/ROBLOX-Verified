@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gamers Network | Collector Monitor</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+body.monitor-page {
+    background: radial-gradient(circle at 10% -10%, rgba(14,165,233,0.22), transparent 45%), #030712;
+    color: #dbeafe;
+    min-height: 100vh;
+}
+.monitor-wrap { max-width: 1150px; margin: 1rem auto 2rem; padding: 0 0.9rem; display: grid; gap: 0.9rem; }
+.monitor-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 0.9rem; }
+.monitor-panel { border: 1px solid #334155; border-radius: 12px; background: linear-gradient(155deg, rgba(15,23,42,0.95), rgba(2,6,23,0.95)); padding: 0.8rem; }
+.monitor-panel h2 { margin: 0 0 0.55rem; color: #7dd3fc; font-size: 1rem; }
+.trend-canvas { width: 100%; height: 220px; border: 1px solid #1e293b; border-radius: 10px; background: rgba(2,6,23,0.6); display: block; }
+.monitor-stats { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:0.55rem; }
+.monitor-stat { border:1px solid #1e3a8a; border-radius:9px; padding:0.45rem; text-align:center; background: rgba(15,23,42,0.75); }
+.monitor-stat .k { display:block; font-size:0.7rem; color:#93c5fd; text-transform:uppercase; letter-spacing:0.05em; }
+.monitor-stat .v { display:block; font-size:1rem; font-weight:700; margin-top:0.15rem; }
+.monitor-list { max-height: 420px; overflow:auto; display:grid; gap:0.45rem; }
+.log-row { border: 1px solid #334155; border-radius: 8px; padding: 0.45rem; font-size: 0.84rem; background: rgba(15,23,42,0.7); }
+.log-row.ok { border-color: #16a34a; }
+.log-row.warn { border-color: #f59e0b; }
+.log-row .t { color:#94a3b8; font-size:0.75rem; }
+.recent-table { width:100%; border-collapse:collapse; font-size:0.86rem; }
+.recent-table th, .recent-table td { border-bottom:1px solid #1f2937; padding:0.45rem; text-align:left; }
+.recent-table th { color:#7dd3fc; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; }
+.pill { font-size:0.72rem; padding:0.08rem 0.35rem; border-radius:999px; border:1px solid #334155; }
+.pill.new { border-color:#10b981; color:#86efac; }
+.pill.seed { border-color:#f59e0b; color:#fcd34d; }
+.pill.bought { border-color:#ef4444; color:#fecaca; }
+.meta { color:#93c5fd; font-size:0.84rem; }
+@media (max-width: 940px) {
+    .monitor-grid { grid-template-columns: 1fr; }
+    .monitor-stats { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+</style>
+</head>
+<body class="main-app dark-mode monitor-page">
+<header>
+    <h1>Collector Monitor</h1>
+    <p>Live runtime details, recent updates, and event logs</p>
+</header>
+<a class="admin-corner-btn home-corner-btn" href="{{ url_for('home') }}" title="Home" aria-label="Open Home">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3l9 8h-2v9h-5v-6H10v6H5v-9H3l9-8z" fill="currentColor"/></svg>
+</a>
+<a class="admin-corner-btn monitor-corner-btn" href="{{ url_for('collector_monitor') }}" title="Collector Monitor" aria-label="Open Collector Monitor">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 5h16v11H4V5zm2 2v7h12V7H6zm3 10h6v2H9v-2z" fill="currentColor"/></svg>
+</a>
+<a class="admin-corner-btn" href="{{ url_for('admin') }}" title="Admin Panel" aria-label="Open Admin Panel">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2L4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5l-8-3zm0 2.2l6 2.3V11c0 4.2-2.7 8.2-6 9.2-3.3-1-6-5-6-9.2V6.5l6-2.3z" fill="currentColor"/></svg>
+</a>
+
+<main class="monitor-wrap">
+    <section class="monitor-panel">
+        <h2>System Overview</h2>
+        <div class="monitor-stats">
+            <div class="monitor-stat"><span class="k">Total Users</span><span class="v" id="sTotal">--</span></div>
+            <div class="monitor-stat"><span class="k">New Users</span><span class="v" id="sNew">--</span></div>
+            <div class="monitor-stat"><span class="k">Seed Users</span><span class="v" id="sSeed">--</span></div>
+            <div class="monitor-stat"><span class="k">Bought Tags</span><span class="v" id="sBought">--</span></div>
+        </div>
+        <p class="meta" id="serverTime">Server time: --</p>
+        <p class="meta" id="cacheInfo">Cache: --</p>
+    </section>
+    <section class="monitor-panel">
+        <h2>Additions Trend (Last 24h)</h2>
+        <canvas id="trendCanvas" class="trend-canvas"></canvas>
+    </section>
+
+    <section class="monitor-grid">
+        <section class="monitor-panel">
+            <h2>Recent Collector Activity</h2>
+            <table class="recent-table">
+                <thead>
+                    <tr><th>User</th><th>ID</th><th>Status</th><th>First Seen</th></tr>
+                </thead>
+                <tbody id="recentBody"></tbody>
+            </table>
+        </section>
+        <section class="monitor-panel">
+            <h2>Event Log</h2>
+            <div class="monitor-list" id="eventList"></div>
+        </section>
+    </section>
+</main>
+
+<script>
+function formatAgo(ts) {
+    if (!ts) return "now";
+    const sec = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    return `${Math.floor(hr / 24)}d ago`;
+}
+
+function renderMonitor(data) {
+    document.getElementById("sTotal").innerText = data.totals.total_users;
+    document.getElementById("sNew").innerText = data.totals.new_users;
+    document.getElementById("sSeed").innerText = data.totals.seed_users;
+    document.getElementById("sBought").innerText = data.totals.bought_users;
+    document.getElementById("serverTime").innerText = `Server time: ${data.server_time}`;
+    document.getElementById("cacheInfo").innerText = `Cache: users ${data.cache.user_cache} | stars ${data.cache.star_cache} | terminated ${data.cache.terminated_cache}`;
+
+    const body = document.getElementById("recentBody");
+    body.innerHTML = "";
+    data.recent.forEach(r => {
+        const tr = document.createElement("tr");
+        const sourceClass = r.source === "Seed List" ? "seed" : "new";
+        tr.innerHTML = `
+            <td>${r.username}${r.bought_tag ? ' <span class="pill bought">Bought</span>' : ''}</td>
+            <td>${r.uid}</td>
+            <td><span class="pill ${sourceClass}">${r.source}</span></td>
+            <td>${formatAgo(r.first_seen_ts)}</td>
+        `;
+        body.appendChild(tr);
+    });
+
+    const events = document.getElementById("eventList");
+    events.innerHTML = "";
+    (data.events || []).forEach(e => {
+        const row = document.createElement("div");
+        row.className = `log-row ${e.level || "info"}`;
+        row.innerHTML = `<div>${e.message}</div><div class="t">${new Date((e.ts || 0) * 1000).toLocaleString()}</div>`;
+        events.appendChild(row);
+    });
+
+    drawTrend(data.trend_24h || []);
+}
+
+function drawTrend(points) {
+    const canvas = document.getElementById("trendCanvas");
+    if (!canvas) return;
+    const ratio = window.devicePixelRatio || 1;
+    const cssW = Math.max(300, canvas.clientWidth || 900);
+    const cssH = 220;
+    canvas.width = Math.floor(cssW * ratio);
+    canvas.height = Math.floor(cssH * ratio);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const padL = 34;
+    const padR = 10;
+    const padT = 14;
+    const padB = 26;
+    const w = cssW - padL - padR;
+    const h = cssH - padT - padB;
+    if (w <= 0 || h <= 0) return;
+
+    const maxY = Math.max(1, ...points.map(p => Number(p.count || 0)));
+    ctx.strokeStyle = "rgba(148,163,184,0.35)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = padT + (h * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(padL + w, y);
+        ctx.stroke();
+    }
+
+    const barW = Math.max(4, Math.floor(w / Math.max(1, points.length) - 2));
+    points.forEach((p, i) => {
+        const x = padL + (i * w) / Math.max(1, points.length) + 1;
+        const val = Number(p.count || 0);
+        const bh = Math.round((val / maxY) * h);
+        const y = padT + h - bh;
+        ctx.fillStyle = "rgba(14,165,233,0.78)";
+        ctx.fillRect(x, y, barW, bh);
+    });
+
+    ctx.fillStyle = "#93c5fd";
+    ctx.font = "11px sans-serif";
+    ctx.fillText(String(maxY), 8, padT + 4);
+    ctx.fillText("0", 16, padT + h + 4);
+    if (points.length) {
+        ctx.fillText(points[0].label, padL, cssH - 8);
+        ctx.fillText(points[points.length - 1].label, padL + w - 34, cssH - 8);
+    }
+}
+
+async function pollMonitor() {
+    try {
+        const res = await fetch("/api/collector_monitor");
+        if (!res.ok) return;
+        const data = await res.json();
+        renderMonitor(data);
+    } catch (_) {}
+}
+
+pollMonitor();
+setInterval(pollMonitor, 5000);
+</script>
+</body>
+</html>
