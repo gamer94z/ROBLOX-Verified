@@ -14,6 +14,10 @@ from database import (
     get_user,
     set_bought_tag,
     get_bought_tags,
+    upsert_frontier_candidates,
+    pull_frontier_candidates,
+    mark_frontier_checked,
+    get_frontier_stats,
     DB_NAME,
     IS_POSTGRES,
 )
@@ -48,6 +52,10 @@ AUTO_SYNC_GROUP_DELAY = float(os.environ.get("AUTO_SYNC_GROUP_DELAY", "0.4"))
 AUTO_SYNC_FRIEND_DELAY = float(os.environ.get("AUTO_SYNC_FRIEND_DELAY", "0.3"))
 AUTO_SYNC_MAX_RETRIES = max(1, int(os.environ.get("AUTO_SYNC_MAX_RETRIES", "3")))
 VERIFIED_IDS_FILE = os.environ.get("VERIFIED_IDS_FILE", "verified_ids.txt")
+AUTO_SYNC_FRONTIER_BATCH = max(50, int(os.environ.get("AUTO_SYNC_FRONTIER_BATCH", "400")))
+AUTO_SYNC_FRONTIER_RECHECK_COOLDOWN = max(
+    3600, int(os.environ.get("AUTO_SYNC_FRONTIER_RECHECK_COOLDOWN", str(7 * 24 * 60 * 60)))
+)
 
 GROUPS = {
     1200769: "Official Roblox Group",
@@ -62,6 +70,10 @@ terminated_cache = {}
 monitor_events = deque(maxlen=250)
 last_seen_db_mtime = None
 api_limit_log_last = {}
+adaptive_backoff_seconds = {
+    "get": 0.0,
+    "post": 0.0,
+}
 auto_sync_state = {
     "enabled": AUTO_SYNC_ENABLED,
     "interval_seconds": AUTO_SYNC_INTERVAL_SECONDS,
@@ -156,12 +168,18 @@ def write_verified_users_file(parsed_rows):
 
 def safe_get(url, params=None, timeout=12):
     for attempt in range(1, AUTO_SYNC_MAX_RETRIES + 1):
+        if adaptive_backoff_seconds["get"] > 0:
+            time.sleep(adaptive_backoff_seconds["get"])
         try:
             r = requests.get(url, params=params, timeout=timeout)
             if r.status_code == 429:
                 log_api_limit(url.split("/")[2], url, {"attempt": attempt})
-                time.sleep(10)
+                adaptive_backoff_seconds["get"] = min(
+                    max(1.0, adaptive_backoff_seconds["get"] * 1.4 + 0.8), 12.0
+                )
+                time.sleep(2 + adaptive_backoff_seconds["get"])
                 continue
+            adaptive_backoff_seconds["get"] = max(0.0, adaptive_backoff_seconds["get"] * 0.85 - 0.05)
             return r
         except requests.exceptions.RequestException:
             app_logger.warning("Auto-sync GET failed (%s/%s): %s", attempt, AUTO_SYNC_MAX_RETRIES, url)
@@ -172,13 +190,21 @@ def safe_get(url, params=None, timeout=12):
 def safe_post(url, json_data, timeout=12):
     cooldown = 8
     for attempt in range(1, AUTO_SYNC_MAX_RETRIES + 1):
+        if adaptive_backoff_seconds["post"] > 0:
+            time.sleep(adaptive_backoff_seconds["post"])
         try:
             r = requests.post(url, json=json_data, timeout=timeout)
             if r.status_code == 429:
                 log_api_limit(url.split("/")[2], url, {"attempt": attempt})
+                adaptive_backoff_seconds["post"] = min(
+                    max(1.0, adaptive_backoff_seconds["post"] * 1.4 + 0.8), 12.0
+                )
                 time.sleep(cooldown)
                 cooldown = min(cooldown * 2, 30)
                 continue
+            adaptive_backoff_seconds["post"] = max(
+                0.0, adaptive_backoff_seconds["post"] * 0.85 - 0.05
+            )
             return r
         except requests.exceptions.RequestException:
             app_logger.warning("Auto-sync POST failed (%s/%s): %s", attempt, AUTO_SYNC_MAX_RETRIES, url)
@@ -225,7 +251,7 @@ def verify_badges_batch(user_ids):
     return verified
 
 
-def scan_group(group_id, group_name, verified_users):
+def scan_group(group_id, group_name, verified_users, frontier_candidates):
     app_logger.info("Collector scanning group: %s (%s)", group_name, group_id)
     cursor = None
     pages = 0
@@ -250,6 +276,7 @@ def scan_group(group_id, group_name, verified_users):
             if not uid or uid in verified_users or uname in EXCLUDED_USERNAMES or uid in seen_candidates:
                 continue
             seen_candidates.add(uid)
+            frontier_candidates.add(int(uid))
             ids_to_check.append(uid)
 
         verified_batch = verify_badges_batch(ids_to_check)
@@ -264,7 +291,7 @@ def scan_group(group_id, group_name, verified_users):
     return len(seen_candidates)
 
 
-def expand_friends(verified_users):
+def expand_friends(verified_users, frontier_candidates):
     app_logger.info("Collector expanding verified friend network...")
     queue = list(verified_users.keys())
     seen = set(queue)
@@ -290,6 +317,7 @@ def expand_friends(verified_users):
                     continue
                 ids.append(fid)
                 seen.add(fid)
+                frontier_candidates.add(int(fid))
 
             scanned += len(ids)
             verified_batch = verify_badges_batch(ids)
@@ -326,18 +354,36 @@ def run_auto_sync_cycle():
     seed_ids = seed_ids[:AUTO_SYNC_SEED_LIMIT]
     app_logger.info("Collector loaded %s seed users", len(seed_ids))
 
+    frontier_candidates = set(int(uid) for uid in seed_ids if str(uid).isdigit())
     seed_verified = verify_badges_batch(seed_ids)
     verified_users = {
         uid: {"username": name, "source": "Seed List"}
         for uid, name in seed_verified.items()
     }
+    frontier_candidates.update(int(uid) for uid in seed_verified.keys())
     app_logger.info("Collector seed verification complete: %s", len(verified_users))
 
     scanned_count = 0
     for gid, gname in GROUPS.items():
-        scanned_count += scan_group(gid, gname, verified_users)
+        scanned_count += scan_group(gid, gname, verified_users, frontier_candidates)
 
-    scanned_count += expand_friends(verified_users)
+    scanned_count += expand_friends(verified_users, frontier_candidates)
+
+    # Persist discovered candidates and re-check highest-priority entries from frontier.
+    upsert_frontier_candidates(frontier_candidates, source="collector_discovery", score_boost=1)
+    frontier_batch = pull_frontier_candidates(
+        limit=AUTO_SYNC_FRONTIER_BATCH,
+        non_verified_cooldown_seconds=AUTO_SYNC_FRONTIER_RECHECK_COOLDOWN,
+    )
+    frontier_batch_ids = [int(uid) for uid in frontier_batch if str(uid).isdigit()]
+    frontier_verified = verify_badges_batch(frontier_batch_ids)
+    frontier_results = {uid: False for uid in frontier_batch}
+    for uid, name in frontier_verified.items():
+        uid_str = str(uid)
+        frontier_results[uid_str] = True
+        if uid not in verified_users:
+            verified_users[uid] = {"username": name, "source": "Frontier Discovery"}
+    mark_frontier_checked(frontier_results)
 
     added = 0
     for uid, info in verified_users.items():
@@ -353,6 +399,8 @@ def run_auto_sync_cycle():
         "Collector cycle finished",
         {
             "seed_verified": len(seed_verified),
+            "frontier_checked": len(frontier_batch_ids),
+            "frontier_verified": len(frontier_verified),
             "verified_total": len(verified_users),
             "scanned_candidates": scanned_count,
             "new_added": added,
@@ -1039,6 +1087,7 @@ def collector_monitor_data():
     seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
     new_total = total - seed_total
     bought_total = sum(1 for _, u in db.items() if bool(u.get("bought_tag")))
+    frontier = get_frontier_stats()
 
     recent_rows = sorted(
         db.items(),
@@ -1088,6 +1137,7 @@ def collector_monitor_data():
                 "new_users": new_total,
                 "bought_users": bought_total,
             },
+            "frontier": frontier,
             "cache": {
                 "user_cache": len(user_cache),
                 "star_cache": len(star_cache),
