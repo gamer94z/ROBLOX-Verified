@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import time
+import json
 
 DB_NAME = os.environ.get("DB_PATH", "verified_users.db")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
@@ -116,6 +117,35 @@ def _migrate_candidate_frontier_if_needed(conn):
     conn.commit()
 
 
+def _create_collector_state_table(conn):
+    cur = conn.cursor()
+    if IS_POSTGRES:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS collector_state (
+                id INTEGER PRIMARY KEY,
+                state_json TEXT NOT NULL,
+                updated_ts BIGINT NOT NULL
+            )
+            """
+        )
+    else:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS collector_state (
+                id INTEGER PRIMARY KEY,
+                state_json TEXT NOT NULL,
+                updated_ts INTEGER NOT NULL
+            )
+            """
+        )
+    conn.commit()
+
+
+def _migrate_collector_state_if_needed(conn):
+    _create_collector_state_table(conn)
+
+
 def _migrate_users_table_if_needed(conn):
     cur = conn.cursor()
     if IS_POSTGRES:
@@ -203,6 +233,7 @@ def init_db():
     try:
         _migrate_users_table_if_needed(conn)
         _migrate_candidate_frontier_if_needed(conn)
+        _migrate_collector_state_if_needed(conn)
     finally:
         conn.close()
 
@@ -392,3 +423,50 @@ def get_frontier_stats():
         "verified": verified,
         "not_verified": not_verified,
     }
+
+
+def save_collector_state(state):
+    payload = json.dumps(state or {}, separators=(",", ":"), ensure_ascii=True)
+    now_ts = int(time.time())
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    if IS_POSTGRES:
+        cur.execute(
+            f"""
+            INSERT INTO collector_state (id, state_json, updated_ts)
+            VALUES (1, {p}, {p})
+            ON CONFLICT (id) DO UPDATE SET
+                state_json = EXCLUDED.state_json,
+                updated_ts = EXCLUDED.updated_ts
+            """,
+            (payload, now_ts),
+        )
+    else:
+        cur.execute(
+            f"""
+            INSERT INTO collector_state (id, state_json, updated_ts)
+            VALUES (1, {p}, {p})
+            ON CONFLICT(id) DO UPDATE SET
+                state_json = excluded.state_json,
+                updated_ts = excluded.updated_ts
+            """,
+            (payload, now_ts),
+        )
+    conn.commit()
+    conn.close()
+
+
+def load_collector_state():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT state_json FROM collector_state WHERE id = 1")
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return {}
+    try:
+        data = json.loads(row[0])
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}

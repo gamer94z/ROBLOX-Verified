@@ -19,6 +19,11 @@ body.monitor-page {
 .monitor-stat { border:1px solid #1e3a8a; border-radius:9px; padding:0.45rem; text-align:center; background: rgba(15,23,42,0.75); }
 .monitor-stat .k { display:block; font-size:0.7rem; color:#93c5fd; text-transform:uppercase; letter-spacing:0.05em; }
 .monitor-stat .v { display:block; font-size:1rem; font-weight:700; margin-top:0.15rem; }
+.monitor-stage { margin-top: 0.7rem; border:1px solid #1e40af; border-radius:9px; padding:0.55rem 0.6rem; background: rgba(15,23,42,0.82); }
+.monitor-stage .title { color:#7dd3fc; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.05em; }
+.monitor-stage .stage { font-size:1rem; font-weight:700; margin-top:0.2rem; color:#dbeafe; }
+.monitor-stage .detail { font-size:0.84rem; color:#93c5fd; margin-top:0.15rem; }
+.monitor-stage .meta-line { font-size:0.78rem; color:#94a3b8; margin-top:0.22rem; }
 .monitor-list { max-height: 420px; overflow:auto; display:grid; gap:0.45rem; }
 .log-row { border: 1px solid #334155; border-radius: 8px; padding: 0.45rem; font-size: 0.84rem; background: rgba(15,23,42,0.7); }
 .log-row.ok { border-color: #16a34a; }
@@ -61,6 +66,20 @@ body.monitor-page {
             <div class="monitor-stat"><span class="k">New Users</span><span class="v" id="sNew">--</span></div>
             <div class="monitor-stat"><span class="k">Seed Users</span><span class="v" id="sSeed">--</span></div>
             <div class="monitor-stat"><span class="k">Bought Tags</span><span class="v" id="sBought">--</span></div>
+            <div class="monitor-stat"><span class="k">Loop Count</span><span class="v" id="sLoops">--</span></div>
+            <div class="monitor-stat"><span class="k">New Found (Cycle)</span><span class="v" id="sCycleFound">--</span></div>
+            <div class="monitor-stat"><span class="k">New Found (Total)</span><span class="v" id="sTotalFound">--</span></div>
+            <div class="monitor-stat"><span class="k">Candidates Scanned</span><span class="v" id="sScanned">--</span></div>
+            <div class="monitor-stat"><span class="k">Frontier Queue</span><span class="v" id="sFrontier">--</span></div>
+            <div class="monitor-stat"><span class="k">Frontier Verified</span><span class="v" id="sFrontierVerified">--</span></div>
+            <div class="monitor-stat"><span class="k">Stage ETA</span><span class="v" id="sStageEta">--</span></div>
+            <div class="monitor-stat"><span class="k">Avg Cycle Time</span><span class="v" id="sAvgCycle">--</span></div>
+        </div>
+        <div class="monitor-stage">
+            <div class="title">Collector Stage</div>
+            <div class="stage" id="stageName">--</div>
+            <div class="detail" id="stageDetail">--</div>
+            <div class="meta-line" id="stageMeta">--</div>
         </div>
         <p class="meta" id="serverTime">Server time: --</p>
         <p class="meta" id="cacheInfo">Cache: --</p>
@@ -100,10 +119,32 @@ function formatAgo(ts) {
 }
 
 function renderMonitor(data) {
+    const progress = data.collector_progress || {};
     document.getElementById("sTotal").innerText = data.totals.total_users;
     document.getElementById("sNew").innerText = data.totals.new_users;
     document.getElementById("sSeed").innerText = data.totals.seed_users;
     document.getElementById("sBought").innerText = data.totals.bought_users;
+    document.getElementById("sLoops").innerText = progress.cycles ?? "--";
+    document.getElementById("sCycleFound").innerText = progress.last_cycle_new_added ?? "--";
+    document.getElementById("sTotalFound").innerText = progress.total_new_verified_found ?? "--";
+    document.getElementById("sScanned").innerText = progress.total_scanned_candidates ?? "--";
+    document.getElementById("sFrontier").innerText = data.frontier?.total ?? "--";
+    document.getElementById("sFrontierVerified").innerText = data.frontier?.verified ?? "--";
+    document.getElementById("sStageEta").innerText = `${Number(progress.stage_eta_seconds || 0)}s`;
+    document.getElementById("sAvgCycle").innerText = `${Number(progress.avg_cycle_duration_seconds || 0)}s`;
+    document.getElementById("stageName").innerText = progress.current_stage || "Idle";
+    document.getElementById("stageDetail").innerText = progress.stage_details || "Waiting for collector data...";
+    const stageElapsed = Number(progress.stage_elapsed_seconds || 0);
+    const stageDone = Number(progress.stage_progress_done || 0);
+    const stageTotal = Number(progress.stage_progress_total || 0);
+    const stageEta = Number(progress.stage_eta_seconds || 0);
+    const nextRunIn = Number(progress.next_run_in_seconds || 0);
+    const progressText = stageTotal > 0 ? ` | Progress ${stageDone}/${stageTotal}` : "";
+    const etaText = stageEta > 0 ? ` | ETA ${stageEta}s` : "";
+    const nextText = nextRunIn > 0 ? ` | Next loop in ${nextRunIn}s` : "";
+    const cycleText = ` | Last cycle ${Number(progress.last_cycle_duration_seconds || 0)}s`;
+    document.getElementById("stageMeta").innerText =
+        `Elapsed ${stageElapsed}s${progressText}${etaText}${nextText}${cycleText}`;
     document.getElementById("serverTime").innerText = `Server time: ${data.server_time}`;
     document.getElementById("cacheInfo").innerText = `Cache: users ${data.cache.user_cache} | stars ${data.cache.star_cache} | terminated ${data.cache.terminated_cache}`;
 

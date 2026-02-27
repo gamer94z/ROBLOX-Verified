@@ -18,6 +18,8 @@ from database import (
     pull_frontier_candidates,
     mark_frontier_checked,
     get_frontier_stats,
+    save_collector_state,
+    load_collector_state,
     DB_NAME,
     IS_POSTGRES,
 )
@@ -83,9 +85,49 @@ auto_sync_state = {
     "last_error": None,
     "next_run_ts": None,
     "cycles": 0,
+    "current_stage": "Idle",
+    "stage_started_ts": None,
+    "stage_details": "",
+    "last_cycle_seed_verified": 0,
+    "last_cycle_frontier_checked": 0,
+    "last_cycle_frontier_verified": 0,
+    "last_cycle_scanned_candidates": 0,
+    "last_cycle_new_added": 0,
+    "total_new_verified_found": 0,
+    "total_scanned_candidates": 0,
+    "stage_progress_done": 0,
+    "stage_progress_total": 0,
+    "stage_eta_seconds": 0,
+    "last_cycle_duration_seconds": 0,
+    "avg_cycle_duration_seconds": 0,
 }
 auto_sync_thread_started = False
 bootstrap_sync_done = False
+PERSISTED_SYNC_KEYS = (
+    "enabled",
+    "interval_seconds",
+    "running",
+    "last_started_ts",
+    "last_success_ts",
+    "last_error",
+    "next_run_ts",
+    "cycles",
+    "current_stage",
+    "stage_started_ts",
+    "stage_details",
+    "last_cycle_seed_verified",
+    "last_cycle_frontier_checked",
+    "last_cycle_frontier_verified",
+    "last_cycle_scanned_candidates",
+    "last_cycle_new_added",
+    "total_new_verified_found",
+    "total_scanned_candidates",
+    "stage_progress_done",
+    "stage_progress_total",
+    "stage_eta_seconds",
+    "last_cycle_duration_seconds",
+    "avg_cycle_duration_seconds",
+)
 
 
 def user_sort_key(item):
@@ -95,6 +137,36 @@ def user_sort_key(item):
     if uid_text.isdigit():
         return (username, 0, int(uid_text))
     return (username, 1, uid_text.lower())
+
+
+def persist_auto_sync_state():
+    snapshot = {k: auto_sync_state.get(k) for k in PERSISTED_SYNC_KEYS}
+    save_collector_state(snapshot)
+
+
+def hydrate_auto_sync_state_from_db():
+    persisted = load_collector_state()
+    if not persisted:
+        return
+    for key in PERSISTED_SYNC_KEYS:
+        if key in persisted:
+            auto_sync_state[key] = persisted.get(key)
+
+
+def set_collector_stage(stage, details="", progress_done=0, progress_total=0, eta_seconds=0):
+    auto_sync_state["current_stage"] = stage
+    auto_sync_state["stage_started_ts"] = int(time.time())
+    auto_sync_state["stage_details"] = details
+    auto_sync_state["stage_progress_done"] = int(progress_done or 0)
+    auto_sync_state["stage_progress_total"] = int(progress_total or 0)
+    auto_sync_state["stage_eta_seconds"] = max(0, int(eta_seconds or 0))
+    persist_auto_sync_state()
+
+
+def update_collector_progress(done, total, eta_seconds=0):
+    auto_sync_state["stage_progress_done"] = int(done or 0)
+    auto_sync_state["stage_progress_total"] = int(total or 0)
+    auto_sync_state["stage_eta_seconds"] = max(0, int(eta_seconds or 0))
 
 
 def log_monitor_event(level, message, details=None):
@@ -228,11 +300,20 @@ def load_seed_ids():
     return list(ids)
 
 
-def verify_badges_batch(user_ids):
+def verify_badges_batch(user_ids, progress_stage=None, progress_detail=None):
     verified = {}
     total = len(user_ids)
     if not total:
         return verified
+
+    if progress_stage:
+        set_collector_stage(
+            progress_stage,
+            progress_detail or "",
+            progress_done=0,
+            progress_total=total,
+            eta_seconds=0,
+        )
 
     for i in range(0, total, AUTO_SYNC_VERIFY_BATCH_SIZE):
         batch = user_ids[i:i + AUTO_SYNC_VERIFY_BATCH_SIZE]
@@ -245,7 +326,13 @@ def verify_badges_batch(user_ids):
             if bool(user.get("hasVerifiedBadge")) and name not in EXCLUDED_USERNAMES:
                 verified[int(user["id"])] = user.get("name") or str(user["id"])
 
-        app_logger.info("Collector batch verified %s/%s", min(i + AUTO_SYNC_VERIFY_BATCH_SIZE, total), total)
+        processed = min(i + AUTO_SYNC_VERIFY_BATCH_SIZE, total)
+        remaining = max(0, total - processed)
+        batches_left = math.ceil(remaining / AUTO_SYNC_VERIFY_BATCH_SIZE) if remaining else 0
+        eta_seconds = int(batches_left * (AUTO_SYNC_BATCH_DELAY + 1.0))
+        update_collector_progress(processed, total, eta_seconds=eta_seconds)
+
+        app_logger.info("Collector batch verified %s/%s", processed, total)
         time.sleep(AUTO_SYNC_BATCH_DELAY)
 
     return verified
@@ -334,6 +421,7 @@ def expand_friends(verified_users, frontier_candidates):
 
 
 def run_auto_sync_cycle():
+    set_collector_stage("Preparing Snapshot", "Loading existing verified snapshot")
     if os.path.exists(TXT_FILE):
         parsed = parse_verified_users_file(TXT_FILE)
     else:
@@ -354,8 +442,19 @@ def run_auto_sync_cycle():
     seed_ids = seed_ids[:AUTO_SYNC_SEED_LIMIT]
     app_logger.info("Collector loaded %s seed users", len(seed_ids))
 
+    set_collector_stage(
+        "Stage 1: Seed Verification",
+        f"Checking {len(seed_ids)} seed candidates",
+        progress_done=0,
+        progress_total=len(seed_ids),
+        eta_seconds=0,
+    )
     frontier_candidates = set(int(uid) for uid in seed_ids if str(uid).isdigit())
-    seed_verified = verify_badges_batch(seed_ids)
+    seed_verified = verify_badges_batch(
+        seed_ids,
+        progress_stage="Stage 1: Seed Verification",
+        progress_detail=f"Checking {len(seed_ids)} seed candidates",
+    )
     verified_users = {
         uid: {"username": name, "source": "Seed List"}
         for uid, name in seed_verified.items()
@@ -364,19 +463,38 @@ def run_auto_sync_cycle():
     app_logger.info("Collector seed verification complete: %s", len(verified_users))
 
     scanned_count = 0
-    for gid, gname in GROUPS.items():
+    group_total = len(GROUPS)
+    for group_index, (gid, gname) in enumerate(GROUPS.items(), start=1):
+        remaining_groups = max(0, group_total - group_index)
+        set_collector_stage(
+            "Stage 2: Group Discovery",
+            f"Scanning group {group_index}/{group_total}: {gname}",
+            progress_done=group_index - 1,
+            progress_total=group_total,
+            eta_seconds=remaining_groups * 20,
+        )
         scanned_count += scan_group(gid, gname, verified_users, frontier_candidates)
+        update_collector_progress(group_index, group_total, eta_seconds=remaining_groups * 20)
 
+    set_collector_stage("Stage 3: Friend Expansion", "Walking friend graph from verified users")
     scanned_count += expand_friends(verified_users, frontier_candidates)
 
     # Persist discovered candidates and re-check highest-priority entries from frontier.
+    set_collector_stage(
+        "Stage 4: Frontier Recheck",
+        f"Rechecking up to {AUTO_SYNC_FRONTIER_BATCH} high-priority candidates",
+    )
     upsert_frontier_candidates(frontier_candidates, source="collector_discovery", score_boost=1)
     frontier_batch = pull_frontier_candidates(
         limit=AUTO_SYNC_FRONTIER_BATCH,
         non_verified_cooldown_seconds=AUTO_SYNC_FRONTIER_RECHECK_COOLDOWN,
     )
     frontier_batch_ids = [int(uid) for uid in frontier_batch if str(uid).isdigit()]
-    frontier_verified = verify_badges_batch(frontier_batch_ids)
+    frontier_verified = verify_badges_batch(
+        frontier_batch_ids,
+        progress_stage="Stage 4: Frontier Recheck",
+        progress_detail=f"Rechecking {len(frontier_batch_ids)} high-priority candidates",
+    )
     frontier_results = {uid: False for uid in frontier_batch}
     for uid, name in frontier_verified.items():
         uid_str = str(uid)
@@ -385,6 +503,13 @@ def run_auto_sync_cycle():
             verified_users[uid] = {"username": name, "source": "Frontier Discovery"}
     mark_frontier_checked(frontier_results)
 
+    set_collector_stage(
+        "Stage 5: Database Sync",
+        "Writing verified snapshot to DB and TXT",
+        progress_done=0,
+        progress_total=2,
+        eta_seconds=4,
+    )
     added = 0
     for uid, info in verified_users.items():
         uid_str = str(uid)
@@ -393,7 +518,20 @@ def run_auto_sync_cycle():
             added += 1
 
     write_verified_users_file(parsed)
+    update_collector_progress(1, 2, eta_seconds=2)
     sync_database(parsed)
+    update_collector_progress(2, 2, eta_seconds=0)
+    auto_sync_state["last_cycle_seed_verified"] = len(seed_verified)
+    auto_sync_state["last_cycle_frontier_checked"] = len(frontier_batch_ids)
+    auto_sync_state["last_cycle_frontier_verified"] = len(frontier_verified)
+    auto_sync_state["last_cycle_scanned_candidates"] = scanned_count
+    auto_sync_state["last_cycle_new_added"] = added
+    auto_sync_state["total_new_verified_found"] = int(
+        auto_sync_state.get("total_new_verified_found") or 0
+    ) + int(added)
+    auto_sync_state["total_scanned_candidates"] = int(
+        auto_sync_state.get("total_scanned_candidates") or 0
+    ) + int(scanned_count)
     log_monitor_event(
         "ok",
         "Collector cycle finished",
@@ -440,33 +578,53 @@ def auto_sync_loop():
     )
     while True:
         started_ts = int(time.time())
+        cycle_start_monotonic = time.time()
         auto_sync_state["running"] = True
         auto_sync_state["last_started_ts"] = started_ts
         auto_sync_state["next_run_ts"] = None
         auto_sync_state["last_error"] = None
         auto_sync_state["cycles"] = int(auto_sync_state["cycles"] or 0) + 1
+        set_collector_stage("Cycle Starting", f"Loop #{auto_sync_state['cycles']}")
 
         try:
             parsed_count, added_count, scanned_count = run_auto_sync_cycle()
             auto_sync_state["last_success_ts"] = int(time.time())
+            cycle_duration = max(0, int(time.time() - cycle_start_monotonic))
+            auto_sync_state["last_cycle_duration_seconds"] = cycle_duration
+            prev_avg = int(auto_sync_state.get("avg_cycle_duration_seconds") or 0)
+            if prev_avg <= 0:
+                auto_sync_state["avg_cycle_duration_seconds"] = cycle_duration
+            else:
+                auto_sync_state["avg_cycle_duration_seconds"] = int(prev_avg * 0.75 + cycle_duration * 0.25)
             app_logger.info(
                 "Auto-sync completed successfully (%s parsed users, %s added, %s scanned)",
                 parsed_count,
                 added_count,
                 scanned_count,
             )
+            persist_auto_sync_state()
         except Exception as exc:
             auto_sync_state["last_error"] = str(exc)
             app_logger.exception("Auto-sync cycle failed")
+            persist_auto_sync_state()
         finally:
             auto_sync_state["running"] = False
             auto_sync_state["next_run_ts"] = int(time.time()) + AUTO_SYNC_INTERVAL_SECONDS
+            set_collector_stage(
+                "Sleeping",
+                f"Next cycle in {AUTO_SYNC_INTERVAL_SECONDS}s",
+                progress_done=0,
+                progress_total=1,
+                eta_seconds=AUTO_SYNC_INTERVAL_SECONDS,
+            )
+            persist_auto_sync_state()
 
         time.sleep(AUTO_SYNC_INTERVAL_SECONDS)
 
 
 def start_auto_sync_worker():
     global auto_sync_thread_started
+    hydrate_auto_sync_state_from_db()
     if auto_sync_thread_started or not AUTO_SYNC_ENABLED:
         return
 
@@ -1082,6 +1240,8 @@ def live_status():
 
 @app.route("/api/collector_monitor")
 def collector_monitor_data():
+    hydrate_auto_sync_state_from_db()
+    now_ts = int(time.time())
     db = get_all_users()
     total = len(db)
     seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
@@ -1105,7 +1265,6 @@ def collector_monitor_data():
         for uid, info in recent_rows
     ]
     # 24h additions trend (hourly buckets).
-    now_ts = int(time.time())
     hour = 3600
     aligned_now = now_ts - (now_ts % hour)
     buckets = [0] * 24
@@ -1131,6 +1290,29 @@ def collector_monitor_data():
         {
             "database_mode": "Auto Collecting",
             "auto_sync": auto_sync_state,
+            "collector_progress": {
+                "current_stage": auto_sync_state.get("current_stage") or "Idle",
+                "stage_details": auto_sync_state.get("stage_details") or "",
+                "stage_elapsed_seconds": max(
+                    0, now_ts - int(auto_sync_state.get("stage_started_ts") or now_ts)
+                ),
+                "stage_progress_done": int(auto_sync_state.get("stage_progress_done") or 0),
+                "stage_progress_total": int(auto_sync_state.get("stage_progress_total") or 0),
+                "stage_eta_seconds": int(auto_sync_state.get("stage_eta_seconds") or 0),
+                "cycles": int(auto_sync_state.get("cycles") or 0),
+                "last_cycle_seed_verified": int(auto_sync_state.get("last_cycle_seed_verified") or 0),
+                "last_cycle_frontier_checked": int(auto_sync_state.get("last_cycle_frontier_checked") or 0),
+                "last_cycle_frontier_verified": int(auto_sync_state.get("last_cycle_frontier_verified") or 0),
+                "last_cycle_scanned_candidates": int(auto_sync_state.get("last_cycle_scanned_candidates") or 0),
+                "last_cycle_new_added": int(auto_sync_state.get("last_cycle_new_added") or 0),
+                "last_cycle_duration_seconds": int(auto_sync_state.get("last_cycle_duration_seconds") or 0),
+                "avg_cycle_duration_seconds": int(auto_sync_state.get("avg_cycle_duration_seconds") or 0),
+                "total_new_verified_found": int(auto_sync_state.get("total_new_verified_found") or 0),
+                "total_scanned_candidates": int(auto_sync_state.get("total_scanned_candidates") or 0),
+                "next_run_in_seconds": max(
+                    0, int(auto_sync_state.get("next_run_ts") or now_ts) - now_ts
+                ) if not auto_sync_state.get("running") else 0,
+            },
             "totals": {
                 "total_users": total,
                 "seed_users": seed_total,
