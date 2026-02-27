@@ -209,7 +209,6 @@ function batchFetchAvatars() {
     const uids = Array.from(document.querySelectorAll(".user-card")).map(c => c.dataset.uid);
     if (uids.length === 0) return;
     const total = uids.length;
-    const PROGRESS_TICK_MS = 25;
     updatePageLoadUI("Loading user metadata...", 0, total);
 
     fetch(`/users_batch?uids=${uids.join(",")}`)
@@ -268,22 +267,16 @@ function batchFetchAvatars() {
                     .catch(() => {});
             }, 1200);
 
-            for (const [uid, payload] of ordered) {
-                if (runId !== batchLoadRunId) return;
+            const loadTasks = ordered.map(([uid, payload]) => new Promise(resolve => {
+                if (runId !== batchLoadRunId) return resolve();
+
                 const card = document.querySelector(`.user-card[data-uid="${uid}"]`);
-                if (card) {
-                    const img = card.querySelector(".avatar-small");
-                    if (img) {
-                        await new Promise(resolve => {
-                            installAvatarFallback(img);
-                            img.addEventListener("load", resolve, { once: true });
-                            img.addEventListener("error", resolve, { once: true });
-                            img.src = payload.avatar_url || AVATAR_PLACEHOLDER;
-                        });
-                    } else {
-                        markAvatarLoaded(img);
-                    }
-                }
+                userDataCache[uid] = {
+                    avatar_url: payload.avatar_url,
+                    is_star_creator: !!payload.is_star_creator,
+                    is_terminated: payload.is_terminated,
+                    is_bought: !!payload.is_bought,
+                };
 
                 if (card && payload.is_terminated) {
                     const bannedRibbon = card.querySelector(".banned-ribbon");
@@ -301,20 +294,25 @@ function batchFetchAvatars() {
                     }
                 }
 
-                userDataCache[uid] = {
-                    avatar_url: payload.avatar_url,
-                    is_star_creator: !!payload.is_star_creator,
-                    is_terminated: payload.is_terminated,
-                    is_bought: !!payload.is_bought,
+                const finalizeOne = (img) => {
+                    if (runId !== batchLoadRunId) return resolve();
+                    markAvatarLoaded(img);
+                    processed += 1;
+                    updatePageLoadUI("Loading users...", processed, total);
+                    resolve();
                 };
-                const img = card?.querySelector(".avatar-small");
-                markAvatarLoaded(img);
-                processed += 1;
-                updatePageLoadUI("Loading users...", processed, total);
-                if (PROGRESS_TICK_MS > 0) {
-                    await new Promise(r => setTimeout(r, PROGRESS_TICK_MS));
-                }
-            }
+
+                if (!card) return finalizeOne(null);
+                const img = card.querySelector(".avatar-small");
+                if (!img) return finalizeOne(null);
+
+                installAvatarFallback(img);
+                img.addEventListener("load", () => finalizeOne(img), { once: true });
+                img.addEventListener("error", () => finalizeOne(img), { once: true });
+                img.src = payload.avatar_url || AVATAR_PLACEHOLDER;
+            }));
+
+            await Promise.allSettled(loadTasks);
             if (runId !== batchLoadRunId) return;
             updatePageLoadUI("Users ready", total, total);
         })

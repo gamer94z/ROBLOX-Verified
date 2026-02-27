@@ -417,7 +417,6 @@ def users_batch():
         pass
 
     returned_ids = set()
-    unresolved_false = []
     try:
         user_ids = [int(uid) for uid in valid_uids]
         r = requests.post(BASE_USERS, json={"userIds": user_ids}, timeout=5)
@@ -425,10 +424,9 @@ def users_batch():
             for entry in r.json().get("data", []):
                 entry_uid = str(entry.get("id"))
                 returned_ids.add(entry_uid)
-                is_term = bool(entry.get("terminated", False) or entry.get("isBanned", False))
-                terminated_data[entry_uid] = is_term
-                if not is_term:
-                    unresolved_false.append(entry_uid)
+                terminated_data[entry_uid] = bool(
+                    entry.get("terminated", False) or entry.get("isBanned", False)
+                )
     except:
         pass
 
@@ -443,18 +441,6 @@ def users_batch():
                     terminated_data[uid] = bool(fut.result())
                 except:
                     terminated_data[uid] = False
-
-    # Verification pass for entries that came back as non-terminated in batch.
-    # This catches occasional false negatives from the bulk endpoint.
-    if unresolved_false:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            futures = {pool.submit(check_terminated, uid, True): uid for uid in unresolved_false}
-            for fut in as_completed(futures):
-                uid = futures[fut]
-                try:
-                    terminated_data[uid] = bool(fut.result())
-                except:
-                    pass
 
     response = {}
     bought_map = get_bought_tags(valid_uids)
