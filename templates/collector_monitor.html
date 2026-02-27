@@ -24,11 +24,61 @@ body.monitor-page {
 .monitor-stage .stage { font-size:1rem; font-weight:700; margin-top:0.2rem; color:#dbeafe; }
 .monitor-stage .detail { font-size:0.84rem; color:#93c5fd; margin-top:0.15rem; }
 .monitor-stage .meta-line { font-size:0.78rem; color:#94a3b8; margin-top:0.22rem; }
+.operator-console { display:grid; grid-template-columns: 92px 1fr; gap:0.7rem; align-items:start; }
+.operator-card {
+    border:1px solid #1d4ed8;
+    border-radius:12px;
+    padding:0.45rem;
+    background: linear-gradient(160deg, rgba(15,23,42,0.95), rgba(30,58,138,0.45));
+    text-align:center;
+}
+.operator-avatar {
+    width:72px;
+    height:72px;
+    border-radius:50%;
+    border:2px solid #38bdf8;
+    object-fit:cover;
+    display:block;
+    margin:0 auto 0.35rem;
+    background:#0f172a;
+}
+.operator-name { font-size:0.78rem; color:#dbeafe; font-weight:700; letter-spacing:0.03em; }
+.operator-role { font-size:0.67rem; color:#93c5fd; text-transform:uppercase; letter-spacing:0.05em; }
+.operator-chat { display:grid; gap:0.5rem; }
+.op-msg {
+    border: 1px solid #334155;
+    border-radius: 10px;
+    background: rgba(15,23,42,0.85);
+    padding: 0.5rem 0.6rem;
+}
+.op-msg .head {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:0.45rem;
+    color:#93c5fd;
+    font-size:0.72rem;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+}
+.op-msg .body {
+    margin-top:0.25rem;
+    color:#dbeafe;
+    font-size:0.88rem;
+    line-height:1.35;
+}
+.op-msg.agent { border-color:#1d4ed8; }
+.op-msg.system { border-color:#0f766e; }
 .monitor-list { max-height: 420px; overflow:auto; display:grid; gap:0.45rem; }
 .log-row { border: 1px solid #334155; border-radius: 8px; padding: 0.45rem; font-size: 0.84rem; background: rgba(15,23,42,0.7); }
 .log-row.ok { border-color: #16a34a; }
 .log-row.warn { border-color: #f59e0b; }
 .log-row .t { color:#94a3b8; font-size:0.75rem; }
+.log-row.live-in { animation: eventIn 260ms ease-out; }
+@keyframes eventIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 .recent-table { width:100%; border-collapse:collapse; font-size:0.86rem; }
 .recent-table th, .recent-table td { border-bottom:1px solid #1f2937; padding:0.45rem; text-align:left; }
 .recent-table th { color:#7dd3fc; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; }
@@ -37,9 +87,26 @@ body.monitor-page {
 .pill.seed { border-color:#f59e0b; color:#fcd34d; }
 .pill.bought { border-color:#ef4444; color:#fecaca; }
 .meta { color:#93c5fd; font-size:0.84rem; }
+.pipeline { display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:0.4rem; }
+.step {
+    border:1px solid #334155;
+    border-radius:9px;
+    padding:0.45rem;
+    font-size:0.78rem;
+    color:#93c5fd;
+    text-align:center;
+    background: rgba(15,23,42,0.72);
+}
+.step.active { border-color:#0ea5e9; color:#e0f2fe; background: rgba(2,132,199,0.2); }
+.step.done { border-color:#16a34a; color:#bbf7d0; background: rgba(22,163,74,0.15); }
+.mini-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+.mini-table th, .mini-table td { border-bottom:1px solid #1f2937; padding:0.35rem; text-align:left; }
+.mini-table th { color:#7dd3fc; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; }
 @media (max-width: 940px) {
     .monitor-grid { grid-template-columns: 1fr; }
     .monitor-stats { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .operator-console { grid-template-columns: 1fr; }
+    .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
 </head>
@@ -60,20 +127,25 @@ body.monitor-page {
 
 <main class="monitor-wrap">
     <section class="monitor-panel">
+        <h2>Pipeline Timeline</h2>
+        <div class="pipeline" id="pipelineSteps">
+            <div class="step" data-stage="Stage 1">Seed</div>
+            <div class="step" data-stage="Stage 2">Groups</div>
+            <div class="step" data-stage="Stage 3">Friends</div>
+            <div class="step" data-stage="Stage 4">Frontier</div>
+            <div class="step" data-stage="Stage 5">Sync</div>
+        </div>
+    </section>
+
+    <section class="monitor-panel">
         <h2>System Overview</h2>
         <div class="monitor-stats">
             <div class="monitor-stat"><span class="k">Total Users</span><span class="v" id="sTotal">--</span></div>
-            <div class="monitor-stat"><span class="k">New Users</span><span class="v" id="sNew">--</span></div>
-            <div class="monitor-stat"><span class="k">Seed Users</span><span class="v" id="sSeed">--</span></div>
-            <div class="monitor-stat"><span class="k">Bought Tags</span><span class="v" id="sBought">--</span></div>
-            <div class="monitor-stat"><span class="k">Loop Count</span><span class="v" id="sLoops">--</span></div>
+            <div class="monitor-stat"><span class="k">Seed / New</span><span class="v" id="sSeedNew">--</span></div>
             <div class="monitor-stat"><span class="k">New Found (Cycle)</span><span class="v" id="sCycleFound">--</span></div>
             <div class="monitor-stat"><span class="k">New Found (Total)</span><span class="v" id="sTotalFound">--</span></div>
-            <div class="monitor-stat"><span class="k">Candidates Scanned</span><span class="v" id="sScanned">--</span></div>
-            <div class="monitor-stat"><span class="k">Frontier Queue</span><span class="v" id="sFrontier">--</span></div>
-            <div class="monitor-stat"><span class="k">Frontier Verified</span><span class="v" id="sFrontierVerified">--</span></div>
             <div class="monitor-stat"><span class="k">Stage ETA</span><span class="v" id="sStageEta">--</span></div>
-            <div class="monitor-stat"><span class="k">Avg Cycle Time</span><span class="v" id="sAvgCycle">--</span></div>
+            <div class="monitor-stat"><span class="k">Frontier Queue</span><span class="v" id="sFrontier">--</span></div>
         </div>
         <div class="monitor-stage">
             <div class="title">Collector Stage</div>
@@ -87,6 +159,30 @@ body.monitor-page {
     <section class="monitor-panel">
         <h2>Additions Trend (Last 24h)</h2>
         <canvas id="trendCanvas" class="trend-canvas"></canvas>
+    </section>
+    <section class="monitor-panel">
+        <h2>Operator Broadcast</h2>
+        <div class="operator-console">
+            <div class="operator-card">
+                <img id="operatorAvatar" class="operator-avatar" alt="Gamer avatar">
+                <div class="operator-name">Gamer</div>
+                <div class="operator-role">Operator</div>
+            </div>
+            <div class="operator-chat">
+                <div class="op-msg agent">
+                    <div class="head"><span>Gamer</span><span>Live Update</span></div>
+                    <div class="body" id="opBubble1">Initializing monitor commentary...</div>
+                </div>
+                <div class="op-msg system">
+                    <div class="head"><span>System</span><span>Scan Feed</span></div>
+                    <div class="body" id="opBubble2">Waiting for live collector metrics...</div>
+                </div>
+                <div class="op-msg agent">
+                    <div class="head"><span>Gamer</span><span>Discovery</span></div>
+                    <div class="body" id="opBubble3">Event feed will stream here as the scanner moves.</div>
+                </div>
+            </div>
+        </div>
     </section>
 
     <section class="monitor-grid">
@@ -104,9 +200,47 @@ body.monitor-page {
             <div class="monitor-list" id="eventList"></div>
         </section>
     </section>
+
+    <section class="monitor-grid">
+        <section class="monitor-panel">
+            <h2>API Health</h2>
+            <p class="meta" id="apiTopLine">429 Total: -- | Last 10m: --</p>
+            <table class="mini-table">
+                <thead><tr><th>Endpoint</th><th>429s</th><th>Retry</th><th>Last Hit</th></tr></thead>
+                <tbody id="apiHealthBody"></tbody>
+            </table>
+        </section>
+        <section class="monitor-panel">
+            <h2>Cycle History</h2>
+            <table class="mini-table">
+                <thead><tr><th>Cycle</th><th>Status</th><th>Duration</th><th>Scanned</th><th>New</th></tr></thead>
+                <tbody id="cycleHistoryBody"></tbody>
+            </table>
+        </section>
+    </section>
 </main>
 
 <script>
+let lastEventId = 0;
+let eventsBootstrapped = false;
+let eventQueue = [];
+let eventPumpTimer = null;
+const OPERATOR_UID = "{{ DEV_UID }}";
+const OPERATOR_AVATAR_PLACEHOLDER = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%230f172a'/%3E%3Cstop offset='1' stop-color='%231e3a8a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='120' height='120' rx='60' fill='url(%23g)'/%3E%3Ccircle cx='60' cy='46' r='22' fill='%2393c5fd' fill-opacity='0.9'/%3E%3Cpath d='M24 103c6-17 20-28 36-28s30 11 36 28' fill='%2393c5fd' fill-opacity='0.9'/%3E%3C/svg%3E";
+
+async function loadOperatorAvatar() {
+    const img = document.getElementById("operatorAvatar");
+    if (!img) return;
+    try {
+        const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${OPERATOR_UID}&size=150x150&format=Png&isCircular=true`);
+        if (!res.ok) throw new Error("avatar");
+        const data = await res.json();
+        img.src = data?.data?.[0]?.imageUrl || OPERATOR_AVATAR_PLACEHOLDER;
+    } catch (_) {
+        img.src = OPERATOR_AVATAR_PLACEHOLDER;
+    }
+}
+
 function formatAgo(ts) {
     if (!ts) return "now";
     const sec = Math.max(0, Math.floor(Date.now() / 1000) - ts);
@@ -121,17 +255,12 @@ function formatAgo(ts) {
 function renderMonitor(data) {
     const progress = data.collector_progress || {};
     document.getElementById("sTotal").innerText = data.totals.total_users;
-    document.getElementById("sNew").innerText = data.totals.new_users;
-    document.getElementById("sSeed").innerText = data.totals.seed_users;
-    document.getElementById("sBought").innerText = data.totals.bought_users;
-    document.getElementById("sLoops").innerText = progress.cycles ?? "--";
+    document.getElementById("sSeedNew").innerText = `${data.totals.seed_users} / ${data.totals.new_users}`;
     document.getElementById("sCycleFound").innerText = progress.last_cycle_new_added ?? "--";
     document.getElementById("sTotalFound").innerText = progress.total_new_verified_found ?? "--";
-    document.getElementById("sScanned").innerText = progress.total_scanned_candidates ?? "--";
     document.getElementById("sFrontier").innerText = data.frontier?.total ?? "--";
-    document.getElementById("sFrontierVerified").innerText = data.frontier?.verified ?? "--";
-    document.getElementById("sStageEta").innerText = `${Number(progress.stage_eta_seconds || 0)}s`;
-    document.getElementById("sAvgCycle").innerText = `${Number(progress.avg_cycle_duration_seconds || 0)}s`;
+    const stageEtaNum = Number(progress.stage_eta_seconds || 0);
+    document.getElementById("sStageEta").innerText = stageEtaNum > 0 ? `${stageEtaNum}s` : "Calculating";
     document.getElementById("stageName").innerText = progress.current_stage || "Idle";
     document.getElementById("stageDetail").innerText = progress.stage_details || "Waiting for collector data...";
     const stageElapsed = Number(progress.stage_elapsed_seconds || 0);
@@ -140,13 +269,17 @@ function renderMonitor(data) {
     const stageEta = Number(progress.stage_eta_seconds || 0);
     const nextRunIn = Number(progress.next_run_in_seconds || 0);
     const progressText = stageTotal > 0 ? ` | Progress ${stageDone}/${stageTotal}` : "";
-    const etaText = stageEta > 0 ? ` | ETA ${stageEta}s` : "";
+    const etaText = stageEta > 0 ? ` | ETA ${stageEta}s` : " | ETA calculating";
     const nextText = nextRunIn > 0 ? ` | Next loop in ${nextRunIn}s` : "";
     const cycleText = ` | Last cycle ${Number(progress.last_cycle_duration_seconds || 0)}s`;
     document.getElementById("stageMeta").innerText =
         `Elapsed ${stageElapsed}s${progressText}${etaText}${nextText}${cycleText}`;
     document.getElementById("serverTime").innerText = `Server time: ${data.server_time}`;
     document.getElementById("cacheInfo").innerText = `Cache: users ${data.cache.user_cache} | stars ${data.cache.star_cache} | terminated ${data.cache.terminated_cache}`;
+    renderOperatorBubbles(data, progress);
+    renderPipeline(progress.current_stage || "Idle");
+    renderApiHealth(data.api_health || {});
+    renderCycleHistory(data.cycle_history || []);
 
     const body = document.getElementById("recentBody");
     body.innerHTML = "";
@@ -162,16 +295,138 @@ function renderMonitor(data) {
         body.appendChild(tr);
     });
 
-    const events = document.getElementById("eventList");
-    events.innerHTML = "";
-    (data.events || []).forEach(e => {
-        const row = document.createElement("div");
-        row.className = `log-row ${e.level || "info"}`;
-        row.innerHTML = `<div>${e.message}</div><div class="t">${new Date((e.ts || 0) * 1000).toLocaleString()}</div>`;
-        events.appendChild(row);
-    });
+    if (!eventsBootstrapped) {
+        seedEvents(data.events || []);
+    }
 
     drawTrend(data.trend_24h || []);
+}
+
+function renderPipeline(stageText) {
+    const steps = Array.from(document.querySelectorAll("#pipelineSteps .step"));
+    const stageMap = {
+        "Stage 1": 1,
+        "Stage 2": 2,
+        "Stage 3": 3,
+        "Stage 4": 4,
+        "Stage 5": 5,
+    };
+    const active = Object.keys(stageMap).find(k => String(stageText || "").startsWith(k));
+    const activeIdx = active ? stageMap[active] : 0;
+    steps.forEach((el, i) => {
+        const idx = i + 1;
+        el.classList.remove("active", "done");
+        if (activeIdx > 0 && idx < activeIdx) el.classList.add("done");
+        if (activeIdx > 0 && idx === activeIdx) el.classList.add("active");
+    });
+}
+
+function renderApiHealth(apiHealth) {
+    const top = document.getElementById("apiTopLine");
+    const body = document.getElementById("apiHealthBody");
+    if (!top || !body) return;
+    top.innerText = `429 Total: ${Number(apiHealth.total_429 || 0)} | Last 10m: ${Number(apiHealth.recent_10m_429 || 0)}`;
+    body.innerHTML = "";
+    (apiHealth.endpoints || []).forEach(row => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${row.name}</td>
+            <td>${Number(row.count || 0)}</td>
+            <td>${Number(row.last_wait_seconds || 0)}s</td>
+            <td>${row.last_ts ? formatAgo(Number(row.last_ts)) : "--"}</td>
+        `;
+        body.appendChild(tr);
+    });
+}
+
+function renderCycleHistory(rows) {
+    const body = document.getElementById("cycleHistoryBody");
+    if (!body) return;
+    body.innerHTML = "";
+    const sorted = [...(rows || [])].sort((a, b) => Number(b.cycle || 0) - Number(a.cycle || 0));
+    sorted.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>#${Number(r.cycle || 0)}</td>
+            <td>${r.status === "ok" ? "OK" : "ERROR"}</td>
+            <td>${Number(r.duration_seconds || 0)}s</td>
+            <td>${Number(r.scanned_candidates || 0)}</td>
+            <td>${Number(r.new_added || 0)}</td>
+        `;
+        body.appendChild(tr);
+    });
+}
+
+function renderOperatorBubbles(data, progress) {
+    const stage = progress.current_stage || "Idle";
+    const loops = Number(progress.cycles || 0);
+    const foundCycle = Number(progress.last_cycle_new_added || 0);
+    const foundTotal = Number(progress.total_new_verified_found || 0);
+    const gName = progress.group_scan_name || "group queue";
+    const gDone = Number(progress.group_member_scanned || 0);
+    const gTotal = Number(progress.group_member_total || 0);
+    const eta = Number(progress.stage_eta_seconds || 0);
+    const nextRun = Number(progress.next_run_in_seconds || 0);
+
+    const bubble1 = document.getElementById("opBubble1");
+    const bubble2 = document.getElementById("opBubble2");
+    const bubble3 = document.getElementById("opBubble3");
+    if (!bubble1 || !bubble2 || !bubble3) return;
+
+    bubble1.innerText = `Current phase: ${stage}. Loop #${loops}. ${eta > 0 ? `Estimated ${eta}s left in this stage.` : "Calibrating ETA from live timings."}`;
+    bubble2.innerText = gTotal > 0
+        ? `Group scan live: ${gName} is at ${gDone}/${gTotal} members processed.`
+        : `Group scan live: ${gName} progress is being tracked by pages and candidate yield.`;
+    bubble3.innerText = nextRun > 0
+        ? `Last loop found ${foundCycle} new verified users. Total discovered so far: ${foundTotal}. Next cycle starts in ${nextRun}s.`
+        : `Collector is active right now. Last loop found ${foundCycle} new verified users. Total discovered so far: ${foundTotal}.`;
+}
+
+function buildEventRow(e, animate = false) {
+    const row = document.createElement("div");
+    row.className = `log-row ${e.level || "info"}${animate ? " live-in" : ""}`;
+    row.innerHTML = `<div>${e.message}</div><div class="t">${new Date((e.ts || 0) * 1000).toLocaleString()}</div>`;
+    return row;
+}
+
+function seedEvents(events) {
+    const list = document.getElementById("eventList");
+    if (!list) return;
+    list.innerHTML = "";
+    (events || []).forEach(e => {
+        list.appendChild(buildEventRow(e, false));
+        lastEventId = Math.max(lastEventId, Number(e.id || 0));
+    });
+    eventsBootstrapped = true;
+}
+
+function enqueueEvents(events) {
+    if (!Array.isArray(events) || !events.length) return;
+    for (const e of events) {
+        const eid = Number(e.id || 0);
+        if (eid <= lastEventId) continue;
+        eventQueue.push(e);
+        lastEventId = Math.max(lastEventId, eid);
+    }
+    startEventPump();
+}
+
+function startEventPump() {
+    if (eventPumpTimer) return;
+    eventPumpTimer = setInterval(() => {
+        const list = document.getElementById("eventList");
+        if (!list || eventQueue.length === 0) {
+            clearInterval(eventPumpTimer);
+            eventPumpTimer = null;
+            return;
+        }
+        const next = eventQueue.shift();
+        const row = buildEventRow(next, true);
+        list.prepend(row);
+        while (list.children.length > 60) {
+            list.removeChild(list.lastChild);
+        }
+    }, 220);
 }
 
 function drawTrend(points) {
@@ -234,8 +489,29 @@ async function pollMonitor() {
     } catch (_) {}
 }
 
+async function pollEvents() {
+    if (!eventsBootstrapped) return;
+    try {
+        const res = await fetch(`/api/collector_events?since_id=${lastEventId}&limit=80`);
+        if (!res.ok) return;
+        const data = await res.json();
+        enqueueEvents(data.events || []);
+        if (!eventQueue.length && Number(data.latest_id || 0) > lastEventId) {
+            lastEventId = Number(data.latest_id || lastEventId);
+        }
+    } catch (_) {}
+}
+
 pollMonitor();
-setInterval(pollMonitor, 5000);
+loadOperatorAvatar();
+setInterval(() => {
+    if (document.hidden) return;
+    pollMonitor();
+}, 15000);
+setInterval(() => {
+    if (document.hidden) return;
+    pollEvents();
+}, 1500);
 </script>
 </body>
 </html>

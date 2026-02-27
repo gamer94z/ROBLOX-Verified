@@ -70,6 +70,8 @@ user_cache = {}
 star_cache = {}
 terminated_cache = {}
 monitor_events = deque(maxlen=250)
+monitor_event_seq = 0
+monitor_event_lock = threading.Lock()
 last_seen_db_mtime = None
 api_limit_log_last = {}
 adaptive_backoff_seconds = {
@@ -100,9 +102,19 @@ auto_sync_state = {
     "stage_eta_seconds": 0,
     "last_cycle_duration_seconds": 0,
     "avg_cycle_duration_seconds": 0,
+    "group_scan_name": "",
+    "group_scan_index": 0,
+    "group_scan_total_groups": 0,
+    "group_member_scanned": 0,
+    "group_member_total": 0,
+    "cycle_history": [],
+    "api_limit_total": 0,
+    "api_limit_hit_timestamps": [],
+    "api_endpoints": {},
 }
 auto_sync_thread_started = False
 bootstrap_sync_done = False
+last_state_persist_ts = 0.0
 PERSISTED_SYNC_KEYS = (
     "enabled",
     "interval_seconds",
@@ -127,6 +139,15 @@ PERSISTED_SYNC_KEYS = (
     "stage_eta_seconds",
     "last_cycle_duration_seconds",
     "avg_cycle_duration_seconds",
+    "group_scan_name",
+    "group_scan_index",
+    "group_scan_total_groups",
+    "group_member_scanned",
+    "group_member_total",
+    "cycle_history",
+    "api_limit_total",
+    "api_limit_hit_timestamps",
+    "api_endpoints",
 )
 
 
@@ -139,9 +160,33 @@ def user_sort_key(item):
     return (username, 1, uid_text.lower())
 
 
-def persist_auto_sync_state():
+def next_monitor_event_id():
+    global monitor_event_seq
+    with monitor_event_lock:
+        monitor_event_seq += 1
+        return monitor_event_seq
+
+
+def push_monitor_event(level, message, details=None):
+    monitor_events.appendleft(
+        {
+            "id": next_monitor_event_id(),
+            "ts": int(time.time()),
+            "level": level,
+            "message": message,
+            "details": details or {},
+        }
+    )
+
+
+def persist_auto_sync_state(force=False):
+    global last_state_persist_ts
+    now = time.time()
+    if not force and (now - last_state_persist_ts) < 1.0:
+        return
     snapshot = {k: auto_sync_state.get(k) for k in PERSISTED_SYNC_KEYS}
     save_collector_state(snapshot)
+    last_state_persist_ts = now
 
 
 def hydrate_auto_sync_state_from_db():
@@ -160,39 +205,60 @@ def set_collector_stage(stage, details="", progress_done=0, progress_total=0, et
     auto_sync_state["stage_progress_done"] = int(progress_done or 0)
     auto_sync_state["stage_progress_total"] = int(progress_total or 0)
     auto_sync_state["stage_eta_seconds"] = max(0, int(eta_seconds or 0))
-    persist_auto_sync_state()
+    persist_auto_sync_state(force=True)
 
 
 def update_collector_progress(done, total, eta_seconds=0):
     auto_sync_state["stage_progress_done"] = int(done or 0)
     auto_sync_state["stage_progress_total"] = int(total or 0)
     auto_sync_state["stage_eta_seconds"] = max(0, int(eta_seconds or 0))
+    persist_auto_sync_state(force=False)
+
+
+def update_collector_stage_details(details, eta_seconds=None):
+    auto_sync_state["stage_details"] = details
+    if eta_seconds is not None:
+        auto_sync_state["stage_eta_seconds"] = max(0, int(eta_seconds or 0))
+    persist_auto_sync_state(force=False)
+
+
+def record_api_limit_hit(service, endpoint, wait_seconds=None):
+    now_ts = int(time.time())
+    key = f"{service} {endpoint}"
+    auto_sync_state["api_limit_total"] = int(auto_sync_state.get("api_limit_total") or 0) + 1
+
+    hits = list(auto_sync_state.get("api_limit_hit_timestamps") or [])
+    hits.append(now_ts)
+    cutoff = now_ts - 3600
+    auto_sync_state["api_limit_hit_timestamps"] = [ts for ts in hits if int(ts) >= cutoff][-800:]
+
+    endpoint_map = dict(auto_sync_state.get("api_endpoints") or {})
+    row = dict(endpoint_map.get(key) or {})
+    row["count"] = int(row.get("count") or 0) + 1
+    row["last_ts"] = now_ts
+    if wait_seconds is not None:
+        row["last_wait_seconds"] = int(max(0, wait_seconds))
+    endpoint_map[key] = row
+    auto_sync_state["api_endpoints"] = endpoint_map
+    persist_auto_sync_state(force=False)
 
 
 def log_monitor_event(level, message, details=None):
-    monitor_events.appendleft(
-        {
-            "ts": int(time.time()),
-            "level": level,
-            "message": message,
-            "details": details or {},
-        }
-    )
+    push_monitor_event(level, message, details)
 
 
 class MonitorLogHandler(logging.Handler):
     def emit(self, record):
         try:
-            monitor_events.appendleft(
-                {
-                    "ts": int(time.time()),
-                    "level": record.levelname.lower(),
-                    "message": record.getMessage(),
-                    "details": {},
-                }
-            )
+            push_monitor_event(record.levelname.lower(), record.getMessage(), {})
         except Exception:
             pass
+
+
+class PathSuppressFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return "/api/collector_monitor" not in msg
 
 
 app_logger = logging.getLogger("gamers_network")
@@ -203,21 +269,38 @@ if not app_logger.handlers:
     app_logger.addHandler(stream_handler)
 if not any(isinstance(h, MonitorLogHandler) for h in app_logger.handlers):
     app_logger.addHandler(MonitorLogHandler())
+for noisy_logger_name in ("werkzeug", "gunicorn.access"):
+    noisy_logger = logging.getLogger(noisy_logger_name)
+    if not any(isinstance(f, PathSuppressFilter) for f in noisy_logger.filters):
+        noisy_logger.addFilter(PathSuppressFilter())
 
 
-def log_api_limit(service, endpoint, details=None):
+def log_api_limit(service, endpoint, details=None, wait_seconds=None):
+    record_api_limit_hit(service, endpoint, wait_seconds=wait_seconds)
     key = f"{service}:{endpoint}"
     now = time.time()
     # Throttle duplicate limit logs so monitor feed stays readable.
     if now - api_limit_log_last.get(key, 0) < 60:
         return
     api_limit_log_last[key] = now
+    details_payload = details or {}
+    if wait_seconds is not None:
+        try:
+            details_payload["retry_in_seconds"] = int(max(0, wait_seconds))
+        except Exception:
+            pass
+    message = f"API rate limit hit: {service} {endpoint}"
+    if wait_seconds is not None:
+        message += f" (retry in {int(max(0, wait_seconds))}s)"
     log_monitor_event(
         "warn",
-        f"API rate limit hit: {service} {endpoint}",
-        details or {},
+        message,
+        details_payload,
     )
-    app_logger.warning("API rate limit hit: %s %s", service, endpoint)
+    if wait_seconds is not None:
+        app_logger.warning("API rate limit hit: %s %s (retry in %ss)", service, endpoint, int(max(0, wait_seconds)))
+    else:
+        app_logger.warning("API rate limit hit: %s %s", service, endpoint)
 
 
 def load_parsed_from_db_snapshot():
@@ -245,11 +328,12 @@ def safe_get(url, params=None, timeout=12):
         try:
             r = requests.get(url, params=params, timeout=timeout)
             if r.status_code == 429:
-                log_api_limit(url.split("/")[2], url, {"attempt": attempt})
                 adaptive_backoff_seconds["get"] = min(
                     max(1.0, adaptive_backoff_seconds["get"] * 1.4 + 0.8), 12.0
                 )
-                time.sleep(2 + adaptive_backoff_seconds["get"])
+                wait_for = 2 + adaptive_backoff_seconds["get"]
+                log_api_limit(url.split("/")[2], url, {"attempt": attempt}, wait_seconds=wait_for)
+                time.sleep(wait_for)
                 continue
             adaptive_backoff_seconds["get"] = max(0.0, adaptive_backoff_seconds["get"] * 0.85 - 0.05)
             return r
@@ -267,10 +351,11 @@ def safe_post(url, json_data, timeout=12):
         try:
             r = requests.post(url, json=json_data, timeout=timeout)
             if r.status_code == 429:
-                log_api_limit(url.split("/")[2], url, {"attempt": attempt})
                 adaptive_backoff_seconds["post"] = min(
                     max(1.0, adaptive_backoff_seconds["post"] * 1.4 + 0.8), 12.0
                 )
+                wait_for = max(cooldown, adaptive_backoff_seconds["post"])
+                log_api_limit(url.split("/")[2], url, {"attempt": attempt}, wait_seconds=wait_for)
                 time.sleep(cooldown)
                 cooldown = min(cooldown * 2, 30)
                 continue
@@ -315,6 +400,7 @@ def verify_badges_batch(user_ids, progress_stage=None, progress_detail=None):
             eta_seconds=0,
         )
 
+    batch_start_ts = time.time()
     for i in range(0, total, AUTO_SYNC_VERIFY_BATCH_SIZE):
         batch = user_ids[i:i + AUTO_SYNC_VERIFY_BATCH_SIZE]
         r = safe_post(BASE_USERS, {"userIds": batch})
@@ -328,8 +414,9 @@ def verify_badges_batch(user_ids, progress_stage=None, progress_detail=None):
 
         processed = min(i + AUTO_SYNC_VERIFY_BATCH_SIZE, total)
         remaining = max(0, total - processed)
-        batches_left = math.ceil(remaining / AUTO_SYNC_VERIFY_BATCH_SIZE) if remaining else 0
-        eta_seconds = int(batches_left * (AUTO_SYNC_BATCH_DELAY + 1.0))
+        elapsed = max(0.001, time.time() - batch_start_ts)
+        avg_per_user = elapsed / max(1, processed)
+        eta_seconds = int(remaining * avg_per_user)
         update_collector_progress(processed, total, eta_seconds=eta_seconds)
 
         app_logger.info("Collector batch verified %s/%s", processed, total)
@@ -338,11 +425,27 @@ def verify_badges_batch(user_ids, progress_stage=None, progress_detail=None):
     return verified
 
 
-def scan_group(group_id, group_name, verified_users, frontier_candidates):
+def scan_group(group_id, group_name, verified_users, frontier_candidates, group_index=None, group_total=None):
     app_logger.info("Collector scanning group: %s (%s)", group_name, group_id)
     cursor = None
     pages = 0
     seen_candidates = set()
+    started = time.time()
+    scanned_members = 0
+    group_member_total = 0
+
+    try:
+        meta = safe_get(f"{BASE_GROUPS}/{group_id}")
+        if meta and meta.status_code == 200:
+            group_member_total = int(meta.json().get("memberCount") or 0)
+    except Exception:
+        group_member_total = 0
+    auto_sync_state["group_scan_name"] = group_name
+    auto_sync_state["group_scan_index"] = int(group_index or 0)
+    auto_sync_state["group_scan_total_groups"] = int(group_total or 0)
+    auto_sync_state["group_member_scanned"] = 0
+    auto_sync_state["group_member_total"] = int(group_member_total or 0)
+    persist_auto_sync_state(force=True)
 
     while True:
         r = safe_get(f"{BASE_GROUPS}/{group_id}/users", params={"limit": 100, "cursor": cursor})
@@ -352,6 +455,7 @@ def scan_group(group_id, group_name, verified_users, frontier_candidates):
 
         data = r.json()
         users = data.get("data", [])
+        scanned_members += len(users)
         cursor = data.get("nextPageCursor")
         pages += 1
 
@@ -370,6 +474,35 @@ def scan_group(group_id, group_name, verified_users, frontier_candidates):
         for uid, name in verified_batch.items():
             verified_users[uid] = {"username": name, "source": f"Group: {group_name}"}
 
+        if group_index and group_total:
+            remaining_groups = max(0, group_total - group_index)
+            elapsed = max(0.001, time.time() - started)
+            eta_seconds = int(elapsed * remaining_groups)
+            detail = (
+                f"Group {group_index}/{group_total}: {group_name} | pages {pages} | candidates {len(seen_candidates)}"
+            )
+            if group_member_total > 0:
+                done = min(scanned_members, group_member_total)
+                rate = done / elapsed if elapsed > 0 else 0.0
+                remaining_members = max(0, group_member_total - done)
+                member_eta = int(remaining_members / rate) if rate > 0 else 0
+                auto_sync_state["group_member_scanned"] = int(done)
+                auto_sync_state["group_member_total"] = int(group_member_total)
+                update_collector_progress(done, group_member_total, eta_seconds=member_eta)
+                detail = (
+                    f"Group {group_index}/{group_total}: {group_name} | members {done}/{group_member_total} scanned | "
+                    f"candidates {len(seen_candidates)}"
+                )
+                eta_seconds = member_eta
+            else:
+                auto_sync_state["group_member_scanned"] = int(scanned_members)
+                auto_sync_state["group_member_total"] = 0
+                update_collector_progress(pages, max(1, pages + 1), eta_seconds=eta_seconds)
+            update_collector_stage_details(
+                detail,
+                eta_seconds=eta_seconds,
+            )
+
         if not cursor:
             break
         time.sleep(AUTO_SYNC_GROUP_DELAY)
@@ -383,9 +516,18 @@ def expand_friends(verified_users, frontier_candidates):
     queue = list(verified_users.keys())
     seen = set(queue)
     scanned = 0
+    roots_done = 0
+    started = time.time()
+
+    update_collector_progress(0, len(queue), eta_seconds=0)
+    update_collector_stage_details(
+        f"Branch roots queued: {len(queue)} | scanned candidates: {scanned}",
+        eta_seconds=0,
+    )
 
     while queue:
         uid = queue.pop(0)
+        roots_done += 1
         cursor = None
         while True:
             r = safe_get(f"{BASE_FRIENDS}/{uid}/friends", params={"limit": 100, "cursor": cursor})
@@ -416,6 +558,16 @@ def expand_friends(verified_users, frontier_candidates):
             if not cursor:
                 break
             time.sleep(AUTO_SYNC_FRIEND_DELAY)
+
+        pending = len(queue)
+        elapsed = max(0.001, time.time() - started)
+        avg_per_root = elapsed / max(1, roots_done)
+        eta_seconds = int(avg_per_root * pending)
+        update_collector_progress(roots_done, roots_done + pending, eta_seconds=eta_seconds)
+        update_collector_stage_details(
+            f"Roots processed: {roots_done} | roots left: {pending} | scanned candidates: {scanned}",
+            eta_seconds=eta_seconds,
+        )
 
     return scanned
 
@@ -464,19 +616,40 @@ def run_auto_sync_cycle():
 
     scanned_count = 0
     group_total = len(GROUPS)
+    completed_group_seconds = 0.0
     for group_index, (gid, gname) in enumerate(GROUPS.items(), start=1):
         remaining_groups = max(0, group_total - group_index)
+        avg_group_seconds = (
+            completed_group_seconds / (group_index - 1)
+            if group_index > 1
+            else 0.0
+        )
         set_collector_stage(
             "Stage 2: Group Discovery",
             f"Scanning group {group_index}/{group_total}: {gname}",
             progress_done=group_index - 1,
             progress_total=group_total,
-            eta_seconds=remaining_groups * 20,
+            eta_seconds=int(avg_group_seconds * remaining_groups),
         )
-        scanned_count += scan_group(gid, gname, verified_users, frontier_candidates)
-        update_collector_progress(group_index, group_total, eta_seconds=remaining_groups * 20)
+        group_started = time.time()
+        scanned_count += scan_group(
+            gid,
+            gname,
+            verified_users,
+            frontier_candidates,
+            group_index=group_index,
+            group_total=group_total,
+        )
+        completed_group_seconds += max(0.0, time.time() - group_started)
+        avg_group_seconds = completed_group_seconds / group_index
 
-    set_collector_stage("Stage 3: Friend Expansion", "Walking friend graph from verified users")
+    set_collector_stage(
+        "Stage 3: Friend Expansion",
+        "Walking friend graph from verified users",
+        progress_done=0,
+        progress_total=max(1, len(verified_users)),
+        eta_seconds=0,
+    )
     scanned_count += expand_friends(verified_users, frontier_candidates)
 
     # Persist discovered candidates and re-check highest-priority entries from frontier.
@@ -602,10 +775,39 @@ def auto_sync_loop():
                 added_count,
                 scanned_count,
             )
+            history = list(auto_sync_state.get("cycle_history") or [])
+            history.append(
+                {
+                    "cycle": int(auto_sync_state.get("cycles") or 0),
+                    "ts": int(time.time()),
+                    "status": "ok",
+                    "duration_seconds": cycle_duration,
+                    "parsed_users": int(parsed_count),
+                    "new_added": int(added_count),
+                    "scanned_candidates": int(scanned_count),
+                    "error": "",
+                }
+            )
+            auto_sync_state["cycle_history"] = history[-20:]
             persist_auto_sync_state()
         except Exception as exc:
             auto_sync_state["last_error"] = str(exc)
             app_logger.exception("Auto-sync cycle failed")
+            cycle_duration = max(0, int(time.time() - cycle_start_monotonic))
+            history = list(auto_sync_state.get("cycle_history") or [])
+            history.append(
+                {
+                    "cycle": int(auto_sync_state.get("cycles") or 0),
+                    "ts": int(time.time()),
+                    "status": "error",
+                    "duration_seconds": cycle_duration,
+                    "parsed_users": 0,
+                    "new_added": 0,
+                    "scanned_candidates": 0,
+                    "error": str(exc),
+                }
+            )
+            auto_sync_state["cycle_history"] = history[-20:]
             persist_auto_sync_state()
         finally:
             auto_sync_state["running"] = False
@@ -834,7 +1036,7 @@ def home():
 
 @app.route("/collector-monitor")
 def collector_monitor():
-    return render_template("collector_monitor.html")
+    return render_template("collector_monitor.html", DEV_UID=DEV_UID)
 
 
 @app.route("/admin", methods=["GET", "POST"])
@@ -1286,6 +1488,22 @@ def collector_monitor_data():
             }
         )
 
+    api_hits = [int(ts) for ts in list(auto_sync_state.get("api_limit_hit_timestamps") or []) if str(ts).isdigit()]
+    recent_cutoff = now_ts - 600
+    api_recent_10m = sum(1 for ts in api_hits if ts >= recent_cutoff)
+    endpoint_rows = []
+    for name, row in dict(auto_sync_state.get("api_endpoints") or {}).items():
+        endpoint_rows.append(
+            {
+                "name": name,
+                "count": int(row.get("count") or 0),
+                "last_ts": int(row.get("last_ts") or 0),
+                "last_wait_seconds": int(row.get("last_wait_seconds") or 0),
+            }
+        )
+    endpoint_rows.sort(key=lambda r: (r["count"], r["last_ts"]), reverse=True)
+    endpoint_rows = endpoint_rows[:8]
+
     return jsonify(
         {
             "database_mode": "Auto Collecting",
@@ -1307,6 +1525,11 @@ def collector_monitor_data():
                 "last_cycle_new_added": int(auto_sync_state.get("last_cycle_new_added") or 0),
                 "last_cycle_duration_seconds": int(auto_sync_state.get("last_cycle_duration_seconds") or 0),
                 "avg_cycle_duration_seconds": int(auto_sync_state.get("avg_cycle_duration_seconds") or 0),
+                "group_scan_name": auto_sync_state.get("group_scan_name") or "",
+                "group_scan_index": int(auto_sync_state.get("group_scan_index") or 0),
+                "group_scan_total_groups": int(auto_sync_state.get("group_scan_total_groups") or 0),
+                "group_member_scanned": int(auto_sync_state.get("group_member_scanned") or 0),
+                "group_member_total": int(auto_sync_state.get("group_member_total") or 0),
                 "total_new_verified_found": int(auto_sync_state.get("total_new_verified_found") or 0),
                 "total_scanned_candidates": int(auto_sync_state.get("total_scanned_candidates") or 0),
                 "next_run_in_seconds": max(
@@ -1328,9 +1551,36 @@ def collector_monitor_data():
             "events": list(monitor_events)[:60],
             "recent": recent,
             "trend_24h": trend_24h,
+            "api_health": {
+                "total_429": int(auto_sync_state.get("api_limit_total") or 0),
+                "recent_10m_429": int(api_recent_10m),
+                "endpoints": endpoint_rows,
+            },
+            "cycle_history": list(auto_sync_state.get("cycle_history") or [])[-20:],
             "server_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
     )
+
+
+@app.route("/api/collector_events")
+def collector_events():
+    try:
+        since_id = max(0, int(request.args.get("since_id", 0)))
+    except Exception:
+        since_id = 0
+    try:
+        limit = max(1, min(120, int(request.args.get("limit", 40))))
+    except Exception:
+        limit = 40
+
+    all_events = list(monitor_events)
+    newer = [e for e in all_events if int(e.get("id", 0)) > since_id]
+    newer_sorted = sorted(newer, key=lambda e: int(e.get("id", 0)))
+    if len(newer_sorted) > limit:
+        newer_sorted = newer_sorted[-limit:]
+
+    latest_id = int(all_events[0].get("id", 0)) if all_events else since_id
+    return jsonify({"events": newer_sorted, "latest_id": latest_id})
 
 # Start background worker as soon as app is imported/launched.
 start_auto_sync_worker()
