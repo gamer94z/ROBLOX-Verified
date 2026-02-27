@@ -21,6 +21,7 @@ db = get_all_users()
 # ---------------- Constants ----------------
 BASE_USERS = "https://users.roblox.com/v1/users"
 BASE_FRIENDS = "https://friends.roblox.com/v1/users"
+BASE_GROUPS = "https://groups.roblox.com/v1/groups"
 VIDEO_STARS_GROUP_ID = 4199740
 USERS_PER_PAGE = 30
 CACHE_EXPIRY = 3600
@@ -34,6 +35,18 @@ AUTO_SYNC_SEED_LIMIT = max(10, int(os.environ.get("AUTO_SYNC_SEED_LIMIT", "120")
 AUTO_SYNC_VERIFY_BATCH_SIZE = max(
     20, min(100, int(os.environ.get("AUTO_SYNC_VERIFY_BATCH_SIZE", "100")))
 )
+AUTO_SYNC_BATCH_DELAY = float(os.environ.get("AUTO_SYNC_BATCH_DELAY", "0.6"))
+AUTO_SYNC_GROUP_DELAY = float(os.environ.get("AUTO_SYNC_GROUP_DELAY", "0.4"))
+AUTO_SYNC_FRIEND_DELAY = float(os.environ.get("AUTO_SYNC_FRIEND_DELAY", "0.3"))
+AUTO_SYNC_MAX_RETRIES = max(1, int(os.environ.get("AUTO_SYNC_MAX_RETRIES", "3")))
+VERIFIED_IDS_FILE = os.environ.get("VERIFIED_IDS_FILE", "verified_ids.txt")
+
+GROUPS = {
+    1200769: "Official Roblox Group",
+    4199740: "Roblox Video Stars",
+    3514227: "DevForum Community",
+}
+EXCLUDED_USERNAMES = {"roblox", "builderman"}
 
 user_cache = {}
 star_cache = {}
@@ -123,63 +136,155 @@ def write_verified_users_file(parsed_rows):
         f.write("\n".join(lines) + ("\n" if lines else ""))
 
 
-def fetch_friend_candidates(uid):
-    try:
-        r = requests.get(f"{BASE_FRIENDS}/{uid}/friends", timeout=8)
-        if r.status_code == 429:
-            log_api_limit("friends.roblox.com", f"/v1/users/{uid}/friends")
-            return []
-        if r.status_code != 200:
-            return []
-        return r.json().get("data", []) or []
-    except Exception:
+def safe_get(url, params=None, timeout=12):
+    for attempt in range(1, AUTO_SYNC_MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+            if r.status_code == 429:
+                log_api_limit(url.split("/")[2], url, {"attempt": attempt})
+                time.sleep(10)
+                continue
+            return r
+        except requests.exceptions.RequestException:
+            app_logger.warning("Auto-sync GET failed (%s/%s): %s", attempt, AUTO_SYNC_MAX_RETRIES, url)
+            time.sleep(2)
+    return None
+
+
+def safe_post(url, json_data, timeout=12):
+    cooldown = 8
+    for attempt in range(1, AUTO_SYNC_MAX_RETRIES + 1):
+        try:
+            r = requests.post(url, json=json_data, timeout=timeout)
+            if r.status_code == 429:
+                log_api_limit(url.split("/")[2], url, {"attempt": attempt})
+                time.sleep(cooldown)
+                cooldown = min(cooldown * 2, 30)
+                continue
+            return r
+        except requests.exceptions.RequestException:
+            app_logger.warning("Auto-sync POST failed (%s/%s): %s", attempt, AUTO_SYNC_MAX_RETRIES, url)
+            time.sleep(2)
+    return None
+
+
+def load_seed_ids():
+    if not os.path.exists(VERIFIED_IDS_FILE):
         return []
+
+    with open(VERIFIED_IDS_FILE, "r", encoding="utf-8") as f:
+        raw = f.read()
+
+    raw = raw.replace("\n", ",").replace("\r", ",")
+    ids = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.add(int(part))
+    return list(ids)
 
 
 def verify_badges_batch(user_ids):
     verified = {}
-    if not user_ids:
+    total = len(user_ids)
+    if not total:
         return verified
-    for i in range(0, len(user_ids), AUTO_SYNC_VERIFY_BATCH_SIZE):
-        chunk = user_ids[i:i + AUTO_SYNC_VERIFY_BATCH_SIZE]
-        try:
-            r = requests.post(BASE_USERS, json={"userIds": chunk}, timeout=10)
-            if r.status_code == 429:
-                log_api_limit("users.roblox.com", "/v1/users (POST verify)")
-                continue
-            if r.status_code != 200:
-                continue
-            for row in r.json().get("data", []):
-                uid = str(row.get("id"))
-                has_badge = bool(row.get("hasVerifiedBadge", False) or row.get("isVerified", False))
-                if has_badge:
-                    verified[uid] = row.get("name") or uid
-        except Exception:
+
+    for i in range(0, total, AUTO_SYNC_VERIFY_BATCH_SIZE):
+        batch = user_ids[i:i + AUTO_SYNC_VERIFY_BATCH_SIZE]
+        r = safe_post(BASE_USERS, {"userIds": batch})
+        if not r or r.status_code != 200:
             continue
+
+        for user in r.json().get("data", []):
+            name = (user.get("name") or "").lower()
+            if bool(user.get("hasVerifiedBadge")) and name not in EXCLUDED_USERNAMES:
+                verified[int(user["id"])] = user.get("name") or str(user["id"])
+
+        app_logger.info("Collector batch verified %s/%s", min(i + AUTO_SYNC_VERIFY_BATCH_SIZE, total), total)
+        time.sleep(AUTO_SYNC_BATCH_DELAY)
+
     return verified
 
 
-def discover_verified_from_network(seed_uids):
-    discovered = {}
-    scanned_candidates = {}
-    seen_candidate_ids = set()
-    seed_cap = min(len(seed_uids), AUTO_SYNC_SEED_LIMIT)
+def scan_group(group_id, group_name, verified_users):
+    app_logger.info("Collector scanning group: %s (%s)", group_name, group_id)
+    cursor = None
+    pages = 0
+    seen_candidates = set()
 
-    for idx, uid in enumerate(seed_uids[:seed_cap], start=1):
-        friends = fetch_friend_candidates(uid)
-        app_logger.info("Collector scanned %s/%s seeds", idx, seed_cap)
-        for f in friends:
-            cid = str(f.get("id") or "")
-            if not cid.isdigit() or cid in seen_candidate_ids:
+    while True:
+        r = safe_get(f"{BASE_GROUPS}/{group_id}/users", params={"limit": 100, "cursor": cursor})
+        if not r or r.status_code != 200:
+            app_logger.warning("Collector group request failed: %s", group_name)
+            break
+
+        data = r.json()
+        users = data.get("data", [])
+        cursor = data.get("nextPageCursor")
+        pages += 1
+
+        ids_to_check = []
+        for entry in users:
+            user = entry.get("user", {})
+            uid = user.get("userId")
+            uname = (user.get("username") or "").lower()
+            if not uid or uid in verified_users or uname in EXCLUDED_USERNAMES or uid in seen_candidates:
                 continue
-            seen_candidate_ids.add(cid)
-            scanned_candidates[cid] = f.get("name") or cid
-            if bool(f.get("hasVerifiedBadge", False) or f.get("isVerified", False)):
-                discovered[cid] = f.get("name") or cid
+            seen_candidates.add(uid)
+            ids_to_check.append(uid)
 
-    unresolved = [int(uid) for uid in scanned_candidates.keys() if uid not in discovered]
-    discovered.update(verify_badges_batch(unresolved))
-    return discovered, len(scanned_candidates)
+        verified_batch = verify_badges_batch(ids_to_check)
+        for uid, name in verified_batch.items():
+            verified_users[uid] = {"username": name, "source": f"Group: {group_name}"}
+
+        if not cursor:
+            break
+        time.sleep(AUTO_SYNC_GROUP_DELAY)
+
+    app_logger.info("Collector finished group: %s (pages=%s)", group_name, pages)
+    return len(seen_candidates)
+
+
+def expand_friends(verified_users):
+    app_logger.info("Collector expanding verified friend network...")
+    queue = list(verified_users.keys())
+    seen = set(queue)
+    scanned = 0
+
+    while queue:
+        uid = queue.pop(0)
+        cursor = None
+        while True:
+            r = safe_get(f"{BASE_FRIENDS}/{uid}/friends", params={"limit": 100, "cursor": cursor})
+            if not r or r.status_code != 200:
+                break
+
+            data = r.json()
+            friends = data.get("data", [])
+            cursor = data.get("nextPageCursor")
+
+            ids = []
+            for f in friends:
+                fid = f.get("id")
+                fname = (f.get("name") or "").lower()
+                if not fid or fid in seen or fname in EXCLUDED_USERNAMES:
+                    continue
+                ids.append(fid)
+                seen.add(fid)
+
+            scanned += len(ids)
+            verified_batch = verify_badges_batch(ids)
+            for fid, name in verified_batch.items():
+                if fid not in verified_users:
+                    verified_users[fid] = {"username": name, "source": "Verified Friend"}
+                    queue.append(fid)
+
+            if not cursor:
+                break
+            time.sleep(AUTO_SYNC_FRIEND_DELAY)
+
+    return scanned
 
 
 def run_auto_sync_cycle():
@@ -187,25 +292,40 @@ def run_auto_sync_cycle():
         parsed = parse_verified_users_file(TXT_FILE)
     else:
         parsed = {}
-
-    # Never run destructive sync with an empty snapshot.
     if not parsed:
         parsed = load_parsed_from_db_snapshot()
 
     existing_db = get_all_users()
-    seed_uids = [
+    fallback_seed_ids = [
         int(uid)
         for uid, info in existing_db.items()
         if str(uid).isdigit() and info.get("source") == "Seed List"
     ]
-    if not seed_uids:
-        seed_uids = [int(uid) for uid in existing_db.keys() if str(uid).isdigit()]
+    if not fallback_seed_ids:
+        fallback_seed_ids = [int(uid) for uid in existing_db.keys() if str(uid).isdigit()]
 
-    discovered, scanned_count = discover_verified_from_network(seed_uids)
+    seed_ids = load_seed_ids() or fallback_seed_ids
+    seed_ids = seed_ids[:AUTO_SYNC_SEED_LIMIT]
+    app_logger.info("Collector loaded %s seed users", len(seed_ids))
+
+    seed_verified = verify_badges_batch(seed_ids)
+    verified_users = {
+        uid: {"username": name, "source": "Seed List"}
+        for uid, name in seed_verified.items()
+    }
+    app_logger.info("Collector seed verification complete: %s", len(verified_users))
+
+    scanned_count = 0
+    for gid, gname in GROUPS.items():
+        scanned_count += scan_group(gid, gname, verified_users)
+
+    scanned_count += expand_friends(verified_users)
+
     added = 0
-    for uid, username in discovered.items():
-        if uid not in parsed:
-            parsed[uid] = {"username": username, "raw_source": "Newly Added"}
+    for uid, info in verified_users.items():
+        uid_str = str(uid)
+        if uid_str not in parsed:
+            parsed[uid_str] = {"username": info["username"], "raw_source": info["source"]}
             added += 1
 
     write_verified_users_file(parsed)
@@ -214,8 +334,9 @@ def run_auto_sync_cycle():
         "ok",
         "Collector cycle finished",
         {
+            "seed_verified": len(seed_verified),
+            "verified_total": len(verified_users),
             "scanned_candidates": scanned_count,
-            "discovered_verified": len(discovered),
             "new_added": added,
             "total_snapshot": len(parsed),
         },
