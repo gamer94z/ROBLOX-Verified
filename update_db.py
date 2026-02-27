@@ -101,11 +101,11 @@ def sync_database(parsed_rows):
 
             cur.execute(upsert_sql, (user_id, row["username"], status, int(first_seen), int(bought_tag)))
 
-        current_ids = set(parsed_rows.keys())
-        stale_ids = [uid for uid in existing.keys() if uid not in current_ids]
+        # Do not hard-delete users missing from a single collector snapshot.
+        # This avoids accidental drops/reclassification caused by transient API misses.
+        stale_ids = [uid for uid in existing.keys() if uid not in parsed_rows]
         if stale_ids:
-            delete_sql = f"DELETE FROM users WHERE user_id={p}"
-            cur.executemany(delete_sql, [(uid,) for uid in stale_ids])
+            print(f"Preserved {len(stale_ids)} existing users not present in this sync cycle.")
 
         conn.commit()
 
