@@ -1,7 +1,6 @@
 import re
-import sqlite3
 import time
-from database import init_db, DB_NAME
+from database import init_db, DB_NAME, IS_POSTGRES, get_connection
 
 TXT_FILE = "verified_users.txt"
 DB_FILE = DB_NAME
@@ -43,22 +42,6 @@ def parse_verified_users_file(path):
     return parsed
 
 
-def ensure_schema(conn):
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            status TEXT NOT NULL,
-            first_seen_ts INTEGER NOT NULL,
-            bought_tag INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-    conn.commit()
-
-
 def load_existing(conn):
     cur = conn.cursor()
     cur.execute("SELECT user_id, username, status, first_seen_ts, bought_tag FROM users")
@@ -92,10 +75,22 @@ def sync_database(parsed_rows):
     init_db()
     now_ts = int(time.time())
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_connection()
     try:
         existing = load_existing(conn)
         cur = conn.cursor()
+        p = "%s" if IS_POSTGRES else "?"
+        upsert_sql = (
+            f"""
+            INSERT INTO users (user_id, username, status, first_seen_ts, bought_tag)
+            VALUES ({p}, {p}, {p}, {p}, {p})
+            ON CONFLICT(user_id) DO UPDATE SET
+                username=excluded.username,
+                status=excluded.status,
+                first_seen_ts=excluded.first_seen_ts,
+                bought_tag=excluded.bought_tag
+            """
+        )
 
         for user_id, row in parsed_rows.items():
             old = existing.get(user_id)
@@ -104,23 +99,13 @@ def sync_database(parsed_rows):
             bought_tag = old["bought_tag"] if old else 0
             status = determine_status(row["raw_source"], old, now_ts)
 
-            cur.execute(
-                """
-                INSERT INTO users (user_id, username, status, first_seen_ts, bought_tag)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    username=excluded.username,
-                    status=excluded.status,
-                    first_seen_ts=excluded.first_seen_ts,
-                    bought_tag=excluded.bought_tag
-                """,
-                (user_id, row["username"], status, int(first_seen), int(bought_tag)),
-            )
+            cur.execute(upsert_sql, (user_id, row["username"], status, int(first_seen), int(bought_tag)))
 
         current_ids = set(parsed_rows.keys())
         stale_ids = [uid for uid in existing.keys() if uid not in current_ids]
         if stale_ids:
-            cur.executemany("DELETE FROM users WHERE user_id=?", [(uid,) for uid in stale_ids])
+            delete_sql = f"DELETE FROM users WHERE user_id={p}"
+            cur.executemany(delete_sql, [(uid,) for uid in stale_ids])
 
         conn.commit()
 

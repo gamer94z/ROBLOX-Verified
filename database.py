@@ -1,39 +1,93 @@
-import sqlite3
 import os
+import sqlite3
 
 DB_NAME = os.environ.get("DB_PATH", "verified_users.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+IS_POSTGRES = DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")
+
+if IS_POSTGRES:
+    import psycopg2
 
 
-def _ensure_parent_dir(path):
-    parent = os.path.dirname(os.path.abspath(path))
+def _pg_dsn():
+    if DATABASE_URL.startswith("postgres://"):
+        return "postgresql://" + DATABASE_URL[len("postgres://"):]
+    return DATABASE_URL
+
+
+def get_connection():
+    if IS_POSTGRES:
+        return psycopg2.connect(_pg_dsn())
+    parent = os.path.dirname(os.path.abspath(DB_NAME))
     if parent:
         os.makedirs(parent, exist_ok=True)
+    return sqlite3.connect(DB_NAME)
+
+
+def _placeholder():
+    return "%s" if IS_POSTGRES else "?"
 
 
 def _get_table_columns(conn, table_name):
     cur = conn.cursor()
+    if IS_POSTGRES:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = %s
+            """,
+            (table_name,),
+        )
+        return [row[0] for row in cur.fetchall()]
     cur.execute(f"PRAGMA table_info({table_name})")
     return [row[1] for row in cur.fetchall()]
 
 
 def _create_users_table(conn):
     cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            status TEXT NOT NULL,
-            first_seen_ts INTEGER NOT NULL,
-            bought_tag INTEGER NOT NULL DEFAULT 0
+    if IS_POSTGRES:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                status TEXT NOT NULL,
+                first_seen_ts BIGINT NOT NULL,
+                bought_tag INTEGER NOT NULL DEFAULT 0
+            )
+            """
         )
-        """
-    )
+    else:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                status TEXT NOT NULL,
+                first_seen_ts INTEGER NOT NULL,
+                bought_tag INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
     conn.commit()
 
 
 def _migrate_users_table_if_needed(conn):
     cur = conn.cursor()
+    if IS_POSTGRES:
+        _create_users_table(conn)
+        cols = set(_get_table_columns(conn, "users"))
+        if "first_seen_ts" not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN first_seen_ts BIGINT")
+            cur.execute(
+                "UPDATE users SET first_seen_ts = EXTRACT(EPOCH FROM NOW())::BIGINT WHERE first_seen_ts IS NULL"
+            )
+        if "bought_tag" not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN bought_tag INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+        return
+
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
     exists = cur.fetchone() is not None
 
@@ -102,8 +156,7 @@ def _migrate_users_table_if_needed(conn):
 
 
 def init_db():
-    _ensure_parent_dir(DB_NAME)
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     try:
         _migrate_users_table_if_needed(conn)
     finally:
@@ -111,7 +164,7 @@ def init_db():
 
 
 def get_all_users():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT user_id, username, status, first_seen_ts, bought_tag FROM users")
     rows = c.fetchall()
@@ -123,7 +176,7 @@ def get_all_users():
         users[uid] = {
             "username": username,
             "source": status,
-            "first_seen_ts": first_seen_ts,
+            "first_seen_ts": int(first_seen_ts),
             "bought_tag": bool(bought_tag),
         }
 
@@ -131,10 +184,11 @@ def get_all_users():
 
 
 def get_user(uid):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
+    p = _placeholder()
     c.execute(
-        "SELECT username, status, first_seen_ts, bought_tag FROM users WHERE user_id=?",
+        f"SELECT username, status, first_seen_ts, bought_tag FROM users WHERE user_id={p}",
         (str(uid),),
     )
     row = c.fetchone()
@@ -144,17 +198,18 @@ def get_user(uid):
         return {
             "username": row[0],
             "source": row[1],
-            "first_seen_ts": row[2],
+            "first_seen_ts": int(row[2]),
             "bought_tag": bool(row[3]),
         }
     return None
 
 
 def set_bought_tag(uid, enabled):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
+    p = _placeholder()
     c.execute(
-        "UPDATE users SET bought_tag=? WHERE user_id=?",
+        f"UPDATE users SET bought_tag={p} WHERE user_id={p}",
         (1 if enabled else 0, str(uid)),
     )
     changed = c.rowcount > 0
@@ -168,9 +223,10 @@ def get_bought_tags(uids):
     if not valid:
         return {}
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
-    placeholders = ",".join("?" for _ in valid)
+    p = _placeholder()
+    placeholders = ",".join(p for _ in valid)
     c.execute(
         f"SELECT user_id, bought_tag FROM users WHERE user_id IN ({placeholders})",
         valid,

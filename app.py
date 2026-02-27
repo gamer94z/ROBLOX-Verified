@@ -8,7 +8,15 @@ import logging
 import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from database import init_db, get_all_users, get_user, set_bought_tag, get_bought_tags, DB_NAME
+from database import (
+    init_db,
+    get_all_users,
+    get_user,
+    set_bought_tag,
+    get_bought_tags,
+    DB_NAME,
+    IS_POSTGRES,
+)
 from update_db import parse_verified_users_file, sync_database, TXT_FILE
 
 app = Flask(__name__)
@@ -65,6 +73,7 @@ auto_sync_state = {
     "cycles": 0,
 }
 auto_sync_thread_started = False
+bootstrap_sync_done = False
 
 
 def log_monitor_event(level, message, details=None):
@@ -344,6 +353,28 @@ def run_auto_sync_cycle():
     return len(parsed), added, scanned_count
 
 
+def bootstrap_database_once():
+    global bootstrap_sync_done
+    if bootstrap_sync_done:
+        return
+    if not os.path.exists(TXT_FILE):
+        app_logger.warning("Bootstrap sync skipped: %s not found", TXT_FILE)
+        bootstrap_sync_done = True
+        return
+    try:
+        parsed = parse_verified_users_file(TXT_FILE)
+        if parsed:
+            sync_database(parsed)
+            app_logger.info("Bootstrap sync loaded %s users from %s", len(parsed), TXT_FILE)
+            log_monitor_event("ok", "Bootstrap database sync complete", {"users": len(parsed)})
+        else:
+            app_logger.warning("Bootstrap sync found no parsable rows in %s", TXT_FILE)
+    except Exception:
+        app_logger.exception("Bootstrap sync failed")
+    finally:
+        bootstrap_sync_done = True
+
+
 def auto_sync_loop():
     app_logger.info(
         "Auto-sync worker started (interval=%ss, enabled=%s)",
@@ -385,6 +416,9 @@ def start_auto_sync_worker():
     # Avoid duplicate workers under Flask debug reloader parent process.
     if app.debug and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         return
+
+    # Fast startup population so deploys do not appear empty before full cycle finishes.
+    bootstrap_database_once()
 
     worker = threading.Thread(target=auto_sync_loop, name="auto-sync-worker", daemon=True)
     worker.start()
@@ -952,10 +986,15 @@ def live_status():
     seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
     new_total = total - seed_total
 
-    try:
-        db_mtime = int(os.path.getmtime(DB_NAME))
-    except OSError:
-        db_mtime = int(time.time())
+    if IS_POSTGRES:
+        db_mtime = int(auto_sync_state.get("last_success_ts") or 0)
+        if db_mtime <= 0:
+            db_mtime = int(time.time())
+    else:
+        try:
+            db_mtime = int(os.path.getmtime(DB_NAME))
+        except OSError:
+            db_mtime = int(time.time())
 
     if last_seen_db_mtime is None:
         last_seen_db_mtime = db_mtime
