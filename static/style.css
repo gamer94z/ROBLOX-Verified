@@ -84,6 +84,9 @@ nav.tabs .tab-link:hover {
 .monitor-corner-btn {
     right: 112px;
 }
+.settings-corner-btn {
+    right: 162px;
+}
 
 .search-section { text-align:center; margin:1rem 0; }
 .search-section input { padding:0.5rem; width:200px; border-radius:5px; border:1px solid #ccc; }

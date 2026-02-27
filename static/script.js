@@ -148,6 +148,7 @@ resetSettingsBtn?.addEventListener("click", () => {
 // ---------------- Settings Modal ----------------
 const settingsModal = document.getElementById("settings-modal");
 const closeSettings = document.getElementById("closeSettings");
+const cornerSettingsBtn = document.getElementById("cornerSettingsBtn");
 
 searchSelect.forEach(btn => {
     if (btn.dataset.type === "settings") {
@@ -158,6 +159,7 @@ searchSelect.forEach(btn => {
 });
 
 closeSettings?.addEventListener("click", () => settingsModal.classList.add("hidden"));
+cornerSettingsBtn?.addEventListener("click", () => settingsModal?.classList.toggle("hidden"));
 
 // ---------------- Draggable Settings ----------------
 if (settingsModal) {

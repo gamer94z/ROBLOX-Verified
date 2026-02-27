@@ -31,6 +31,11 @@
         <path d="M4 5h16v11H4V5zm2 2v7h12V7H6zm3 10h6v2H9v-2z" fill="currentColor"/>
     </svg>
 </a>
+<button class="admin-corner-btn settings-corner-btn" id="cornerSettingsBtn" title="Settings" aria-label="Open Settings" type="button">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 00.12-.64l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7.02 7.02 0 00-1.63-.94l-.36-2.54A.5.5 0 0013.9 2h-3.8a.5.5 0 00-.49.42l-.36 2.54c-.58.23-1.12.54-1.63.94l-2.39-.96a.5.5 0 00-.6.22L2.71 8.48a.5.5 0 00.12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 00-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.49.42h3.8c.24 0 .45-.18.49-.42l.36-2.54c.58-.23 1.13-.54 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 00-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1112 8a3.5 3.5 0 010 7.5z" fill="currentColor"/>
+    </svg>
+</button>
 <a class="admin-corner-btn" href="{{ url_for('admin') }}" title="Admin Panel" aria-label="Open Admin Panel">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
         <path d="M12 2L4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5l-8-3zm0 2.2l6 2.3V11c0 4.2-2.7 8.2-6 9.2-3.3-1-6-5-6-9.2V6.5l6-2.3zm-1.2 5.3h2.4v5.2h-2.4V9.5zm0 6.3h2.4v2.2h-2.4v-2.2z" fill="currentColor"/>
@@ -57,8 +62,7 @@
     <button class="tab-btn {% if search_type=='new' %}active{% endif %}" data-type="new">Newly Added</button>
     <button class="tab-btn {% if search_type=='seed' %}active{% endif %}" data-type="seed">Seed List</button>
     <button class="tab-btn {% if search_type=='database' %}active{% endif %}" data-type="database">Database</button>
-    <button class="tab-btn {% if search_type=='individual' %}active{% endif %}" data-type="individual">Individual</button>
-    <button class="tab-btn" data-type="settings">Settings</button>
+    <button class="tab-btn {% if search_type=='individual' %}active{% endif %}" data-type="individual">Search</button>
 </nav>
 
 <main>
