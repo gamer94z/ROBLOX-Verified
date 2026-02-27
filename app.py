@@ -76,6 +76,15 @@ auto_sync_thread_started = False
 bootstrap_sync_done = False
 
 
+def user_sort_key(item):
+    uid, info = item
+    username = str(info.get("username", "")).lower()
+    uid_text = str(uid)
+    if uid_text.isdigit():
+        return (username, 0, int(uid_text))
+    return (username, 1, uid_text.lower())
+
+
 def log_monitor_event(level, message, details=None):
     monitor_events.appendleft(
         {
@@ -759,10 +768,11 @@ def index():
         filtered = {}
         total_label = ""
 
-    total_pages = math.ceil(len(filtered) / USERS_PER_PAGE)
+    sorted_items = sorted(filtered.items(), key=user_sort_key)
+    total_pages = math.ceil(len(sorted_items) / USERS_PER_PAGE)
     start = (page - 1) * USERS_PER_PAGE
     end = start + USERS_PER_PAGE
-    page_items = dict(list(filtered.items())[start:end])
+    page_items = dict(sorted_items[start:end])
 
     return render_template(
         "index.html",
@@ -798,11 +808,12 @@ def database_page():
     except:
         page = 1
 
-    total_users = len(filtered)
+    sorted_items = sorted(filtered.items(), key=user_sort_key)
+    total_users = len(sorted_items)
     total_pages = math.ceil(total_users / USERS_PER_PAGE)
     start = (page - 1) * USERS_PER_PAGE
     end = start + USERS_PER_PAGE
-    page_items = list(filtered.items())[start:end]
+    page_items = sorted_items[start:end]
 
     # Pass filter values back to template to keep selections
     filters = {
