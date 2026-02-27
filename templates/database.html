@@ -1,17 +1,43 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>ROBLOX-Verified Database</title>
+<title>Gamers Network Database</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="main-app">
 
 <header>
-    <h1>ROBLOX-Verified</h1>
-    <p>Gamers Database Organiser</p>
+    <h1>Gamers Network</h1>
+    <p>Verified User Intelligence Console</p>
 </header>
+<a class="admin-corner-btn home-corner-btn" href="{{ url_for('home') }}" title="Home" aria-label="Open Home">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M12 3l9 8h-2v9h-5v-6H10v6H5v-9H3l9-8z" fill="currentColor"/>
+    </svg>
+</a>
+<a class="admin-corner-btn" href="{{ url_for('admin') }}" title="Admin Panel" aria-label="Open Admin Panel">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M12 2L4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5l-8-3zm0 2.2l6 2.3V11c0 4.2-2.7 8.2-6 9.2-3.3-1-6-5-6-9.2V6.5l6-2.3zm-1.2 5.3h2.4v5.2h-2.4V9.5zm0 6.3h2.4v2.2h-2.4v-2.2z" fill="currentColor"/>
+    </svg>
+</a>
+
+<section class="live-status slim">
+    <p><span class="badge badge-new">ONLINE</span> <strong id="liveMode">Connecting...</strong></p>
+    <p id="liveUpdated">Last DB update: checking...</p>
+    <p id="liveTotals">Total: -- | Seed: -- | Newly Added: --</p>
+</section>
+
+<section class="page-load-status panel" id="pageLoadStatus">
+    <div class="load-top">
+        <strong id="pageLoadText">Loading users...</strong>
+        <span id="pageLoadProgress">0/0</span>
+    </div>
+    <div class="load-bar">
+        <div class="load-bar-fill" id="pageLoadBar"></div>
+    </div>
+</section>
 
 <nav class="tabs">
     <button class="tab-btn {% if search_type=='database' %}active{% endif %}" data-type="database">Database</button>
@@ -19,7 +45,22 @@
 </nav>
 
 <main>
-<section class="search-section">
+<section class="dashboard-strip">
+    <div class="stat-pill">
+        <span>Current View</span>
+        <strong>Database</strong>
+    </div>
+    <div class="stat-pill">
+        <span>Result Count</span>
+        <strong>Total Users: {{ total_users }}</strong>
+    </div>
+</section>
+
+<section class="search-section panel">
+    {% set has_filters = filters.length or filters.letters_only %}
+    <details class="filter-dropdown" {% if has_filters %}open{% endif %}>
+        <summary>Database Filters</summary>
+        <div class="filter-dropdown-body">
     <form method="get" id="filterForm">
         <label for="length">Name Length:</label>
         <select name="length" id="length">
@@ -36,12 +77,18 @@
 
         <button type="submit">Apply Filter</button>
     </form>
+        </div>
+    </details>
 </section>
 
-<section class="results">
+<section class="results panel">
     {% for uid, info in users %}
     <div class="user-card" data-uid="{{ uid }}">
-        <img class="avatar-small" alt="Avatar" loading="lazy">
+        <span class="banned-ribbon" style="display:none;">TERMINATED</span>
+        <div class="avatar-shell is-loading">
+            <div class="avatar-spinner"></div>
+            <img class="avatar-small loading-avatar" alt="Avatar" loading="lazy">
+        </div>
         <h3>{{ info.username }} ({{ uid }})</h3>
         <p class="source">
             {% if info.source=='Seed List' %}
@@ -50,6 +97,7 @@
             <span class="badge badge-new">Newly Added</span>
             {% endif %}
             <span class="badge badge-star shiny" style="display:none;">Star Creator</span>
+            {% if info.bought_tag %}<span class="badge badge-bought">Bought Check</span>{% endif %}
         </p>
     </div>
 
@@ -57,7 +105,10 @@
         <div class="modal-content">
             <span class="close">&times;</span>
             <div class="modal-left">
-                <div class="loading-text">Loading Data:</div>
+                <div class="loading-indicator">
+                    <div class="spinner"></div>
+                    <div class="loading-text">Loading profile...</div>
+                </div>
                 <img class="avatar-large fade-in" style="display:none;" alt="Avatar">
             </div>
             <div class="modal-right">
@@ -71,22 +122,48 @@
     {% endfor %}
 </section>
 
-<div class="pagination">
+<div class="pagination panel">
     <span>Total Users: {{ total_users }}</span>
 </div>
 
 <footer>
-<p>ROBLOX-Verified &copy; 2026</p>
+<p>Gamers Network &copy; 2026</p>
 </footer>
 
 <div id="settings-modal" class="settings-modal hidden">
-    <div class="settings-header">Settings <span id="closeSettings">&times;</span></div>
+    <div class="settings-header">Control Center <span id="closeSettings">&times;</span></div>
     <div class="settings-body">
-        <button id="lightModeBtn">Light Mode</button>
-        <button id="darkModeBtn">Dark Mode</button>
+        <div class="settings-group">
+            <p class="settings-label">Theme</p>
+            <div class="settings-row">
+                <button id="lightModeBtn" class="settings-btn" type="button">Light</button>
+                <button id="darkModeBtn" class="settings-btn" type="button">Dark</button>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <label class="settings-label" for="refreshIntervalSelect">Live Refresh</label>
+            <select id="refreshIntervalSelect" class="settings-select">
+                <option value="10000">10 seconds</option>
+                <option value="30000">30 seconds</option>
+                <option value="60000">1 minute</option>
+                <option value="120000">2 minutes</option>
+            </select>
+        </div>
+
+        <div class="settings-group settings-toggles">
+            <label><input type="checkbox" id="toggleCompactCards"> Compact cards</label>
+            <label><input type="checkbox" id="toggleReducedMotion"> Reduce motion</label>
+            <label><input type="checkbox" id="toggleShowStars" checked> Show star badges</label>
+            <label><input type="checkbox" id="toggleShowTerminated" checked> Show terminated tape</label>
+        </div>
+
+        <button id="resetSettingsBtn" class="settings-reset" type="button">Reset Settings</button>
     </div>
 </div>
 
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
+
+

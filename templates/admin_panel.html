@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gamers Network | Admin Panel</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="main-app dark-mode admin-console">
+<header>
+    <h1>Gamers Network</h1>
+    <p>Operator Control Console</p>
+</header>
+
+<main class="admin-main">
+    <section class="panel admin-toolbar">
+        <div class="admin-title">
+            <h2>Bought Check Tag Manager</h2>
+            <p>Tag users who bought verification, then sync badge visibility across the site.</p>
+        </div>
+
+        <form method="get" class="admin-search">
+            <input type="text" name="query" value="{{ query }}" placeholder="Search username or user id">
+            <select name="bought_filter" aria-label="Bought tag filter">
+                <option value="all" {% if bought_filter == "all" %}selected{% endif %}>All Users</option>
+                <option value="blocked" {% if bought_filter == "blocked" %}selected{% endif %}>Blocked Checkmarks</option>
+                <option value="clean" {% if bought_filter == "clean" %}selected{% endif %}>Not Blocked</option>
+            </select>
+            <button type="submit">Search</button>
+        </form>
+
+        <form method="post" action="{{ url_for('admin_logout') }}" class="admin-logout">
+            <button type="submit">Logout</button>
+        </form>
+    </section>
+
+    <section class="panel admin-stats">
+        <div class="admin-stat">
+            <span>Total Results</span>
+            <strong>{{ total }}</strong>
+        </div>
+        <div class="admin-stat">
+            <span>Current Page</span>
+            <strong>{{ page }} / {{ total_pages }}</strong>
+        </div>
+        <div class="admin-stat">
+            <span>Filter</span>
+            <strong>{{ query if query else "None" }}</strong>
+        </div>
+    </section>
+
+    <section class="panel admin-table-wrap">
+        <div class="admin-table-scroll">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>User ID</th>
+                        <th>Status</th>
+                        <th>Bought Check</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for uid, info in users %}
+                    <tr data-uid="{{ uid }}">
+                        <td class="u-name">{{ info.username }}</td>
+                        <td class="u-id">{{ uid }}</td>
+                        <td>{{ info.source }}</td>
+                        <td class="bought-state">
+                            <span class="state-pill {{ 'is-on' if info.bought_tag else 'is-off' }}">
+                                {{ "Enabled" if info.bought_tag else "Disabled" }}
+                            </span>
+                        </td>
+                        <td>
+                            <button
+                                class="toggle-bought-btn {{ 'remove' if info.bought_tag else 'mark' }}"
+                                data-uid="{{ uid }}"
+                                data-next="{{ 0 if info.bought_tag else 1 }}"
+                                type="button">
+                                {{ "Remove Tag" if info.bought_tag else "Mark Bought" }}
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="pagination panel admin-pagination">
+        {% if page > 1 %}
+        <a href="?page={{ page-1 }}&query={{ query }}&bought_filter={{ bought_filter }}">Prev</a>
+        {% endif %}
+        <span>Page {{ page }} / {{ total_pages }}</span>
+        {% if page < total_pages %}
+        <a href="?page={{ page+1 }}&query={{ query }}&bought_filter={{ bought_filter }}">Next</a>
+        {% endif %}
+    </section>
+</main>
+
+<script>
+const statusBar = document.createElement("div");
+statusBar.className = "admin-status";
+document.body.appendChild(statusBar);
+let statusHideTimer = null;
+
+function setStatus(text, type = "info") {
+    statusBar.innerText = text;
+    statusBar.dataset.type = type;
+    statusBar.classList.add("show");
+    if (statusHideTimer) clearTimeout(statusHideTimer);
+    statusHideTimer = setTimeout(() => {
+        statusBar.classList.remove("show");
+    }, 2400);
+}
+
+document.querySelectorAll(".toggle-bought-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+        const uid = btn.dataset.uid;
+        const next = btn.dataset.next === "1";
+        btn.disabled = true;
+        setStatus(`Updating ${uid}...`, "info");
+
+        try {
+            const res = await fetch("/api/admin/bought_tag", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ uid, bought_tag: next })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || "Update failed");
+
+            const row = btn.closest("tr");
+            const stateCell = row.querySelector(".bought-state");
+            stateCell.innerHTML = `<span class="state-pill ${next ? 'is-on' : 'is-off'}">${next ? 'Enabled' : 'Disabled'}</span>`;
+            btn.dataset.next = next ? "0" : "1";
+            btn.innerText = next ? "Remove Tag" : "Mark Bought";
+            btn.classList.toggle("mark", !next);
+            btn.classList.toggle("remove", next);
+            setStatus(`Updated ${uid} successfully`, "ok");
+        } catch (e) {
+            setStatus(e.message || "Failed to update", "error");
+        } finally {
+            btn.disabled = false;
+        }
+    });
+});
+</script>
+</body>
+</html>
