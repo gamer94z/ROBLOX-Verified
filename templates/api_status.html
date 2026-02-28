@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gamers Network | API Status</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+.status-wrap { max-width: 1080px; margin: 1.2rem auto 2rem; padding: 0 0.9rem; display: grid; gap: 0.9rem; }
+.status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+.status-card, .status-panel {
+    border: 1px solid #334155;
+    border-radius: 12px;
+    background: linear-gradient(155deg, rgba(15,23,42,0.94), rgba(2,6,23,0.94));
+    padding: 0.75rem;
+}
+.status-card .k { display:block; font-size:0.72rem; color:#93c5fd; text-transform:uppercase; letter-spacing:.05em; }
+.status-card .v { display:block; margin-top:.2rem; font-size:1.05rem; font-weight:700; color:#e2e8f0; }
+.status-panel h2 { margin:0 0 .55rem; color:#7dd3fc; font-size:1rem; }
+.status-table { width:100%; border-collapse:collapse; font-size:.86rem; }
+.status-table th, .status-table td { text-align:left; border-bottom:1px solid #1f2937; padding:.42rem; }
+.status-table th { font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; color:#93c5fd; }
+.status-meta { color:#93c5fd; font-size:.84rem; }
+.chart-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:.75rem; }
+.chart-card { border:1px solid #334155; border-radius:12px; background:linear-gradient(155deg, rgba(15,23,42,0.94), rgba(2,6,23,0.94)); padding:.65rem; }
+.chart-title { margin:0 0 .38rem; color:#7dd3fc; font-size:.86rem; text-transform:uppercase; letter-spacing:.05em; }
+.chart-canvas { width:100%; height:160px; border:1px solid #1f2937; border-radius:8px; background:rgba(2,6,23,.55); display:block; }
+.chart-meta { display:flex; justify-content:space-between; align-items:center; margin-top:.35rem; color:#94a3b8; font-size:.74rem; }
+.tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  cursor: help;
+}
+.tip::before {
+  content: "?";
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0f172a;
+  background: #7dd3fc;
+  box-shadow: 0 0 0 1px rgba(2, 6, 23, 0.35);
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  min-width: 210px;
+  max-width: 320px;
+  padding: .5rem .6rem;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: linear-gradient(155deg, rgba(15,23,42,.98), rgba(2,6,23,.98));
+  color: #e2e8f0;
+  font-size: .75rem;
+  font-weight: 500;
+  line-height: 1.35;
+  box-shadow: 0 10px 24px rgba(2,6,23,.45);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+  z-index: 35;
+  pointer-events: none;
+}
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+@media (max-width: 900px) {
+  .status-grid { grid-template-columns: 1fr; }
+  .chart-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body class="main-app dark-mode">
+<header>
+  <h1>API Status</h1>
+  <p>Runtime resources, request traffic, latency, and endpoint probe telemetry</p>
+</header>
+<a class="admin-corner-btn home-corner-btn" href="{{ url_for('home') }}" title="Home" aria-label="Open Home">
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3l9 8h-3v9h-5v-6H11v6H6v-9H3l9-8z" fill="currentColor"/></svg>
+</a>
+<a class="admin-corner-btn monitor-corner-btn" href="{{ url_for('index') }}" title="Index" aria-label="Open Index">
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 4h8v7H3V4zm10 0h8v5h-8V4zM3 13h8v7H3v-7zm10-2h8v9h-8v-9z" fill="currentColor"/></svg>
+</a>
+<a class="admin-corner-btn settings-corner-btn" href="{{ url_for('collector_monitor') }}" title="Collector Monitor" aria-label="Open Collector Monitor">
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 5h16v11H4V5zm2 2v7h12V7H6zm3 10h6v2H9v-2z" fill="currentColor"/></svg>
+</a>
+
+<main class="status-wrap">
+  <section class="status-grid">
+    <div class="status-card"><span class="k tip" data-tip="How much RAM the app process is currently using.">Process Memory</span><span class="v" id="sMem">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="How many API/web requests the app handled in the last 60 seconds.">Requests / Minute</span><span class="v" id="sReqMin">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="Incoming traffic from users to the server, measured per minute.">Input / Minute</span><span class="v" id="sInMin">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="Outgoing traffic from the server back to users, measured per minute.">Output / Minute</span><span class="v" id="sOutMin">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="Response speed: average latency and slower-end (95th percentile) latency.">Latency (Avg / P95)</span><span class="v" id="sLatency">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="How long the app process has been running since last restart.">Uptime</span><span class="v" id="sUptime">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="All requests handled since startup, not just the last minute.">Total Requests</span><span class="v" id="sReqTotal">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="Total inbound and outbound data transferred since startup.">Total Transfer</span><span class="v" id="sTransferTotal">--</span></div>
+    <div class="status-card"><span class="k tip" data-tip="Quick summary of endpoint checks: healthy, slow/degraded, or down.">Probe Health</span><span class="v" id="sProbe">--</span></div>
+  </section>
+
+  <section class="chart-grid">
+    <article class="chart-card">
+      <h3 class="chart-title tip" data-tip="Live memory usage trend over recent samples. Higher means more RAM use.">Memory (RSS MB)</h3>
+      <canvas id="chartMem" class="chart-canvas"></canvas>
+      <div class="chart-meta"><span id="chartMemMeta">--</span><span>Last 60 points</span></div>
+    </article>
+    <article class="chart-card">
+      <h3 class="chart-title tip" data-tip="Shows request load trend. Spikes usually mean more users or refresh activity.">Requests / Minute</h3>
+      <canvas id="chartReq" class="chart-canvas"></canvas>
+      <div class="chart-meta"><span id="chartReqMeta">--</span><span>Last 60 points</span></div>
+    </article>
+    <article class="chart-card">
+      <h3 class="chart-title tip" data-tip="Response-time trend. Avg is normal speed; P95 shows slower-edge responses users might feel.">Latency (Avg / P95 ms)</h3>
+      <canvas id="chartLat" class="chart-canvas"></canvas>
+      <div class="chart-meta"><span id="chartLatMeta">--</span><span>Avg: cyan, P95: orange</span></div>
+    </article>
+    <article class="chart-card">
+      <h3 class="chart-title tip" data-tip="Network throughput trend. In = data received, Out = data sent back to clients.">Traffic / Minute (KB)</h3>
+      <canvas id="chartIo" class="chart-canvas"></canvas>
+      <div class="chart-meta"><span id="chartIoMeta">--</span><span>In: cyan, Out: green</span></div>
+    </article>
+  </section>
+
+  <section class="status-panel">
+    <h2><span class="tip" data-tip="Live checks against key endpoints to confirm they are reachable and responding.">Live Endpoint Probes</span></h2>
+    <table class="status-table">
+      <thead><tr><th>Service</th><th>Status</th><th>HTTP</th><th>Latency</th></tr></thead>
+      <tbody id="probeBody"></tbody>
+    </table>
+    <p class="status-meta" id="sTime">Server time: --</p>
+  </section>
+
+  <section class="status-panel">
+    <h2><span class="tip" data-tip="Most used API/page paths based on request count.">Top Routes (Traffic)</span></h2>
+    <table class="status-table">
+      <thead><tr><th>Route</th><th>Requests</th></tr></thead>
+      <tbody id="routeBody"></tbody>
+    </table>
+  </section>
+
+  <section class="status-panel">
+    <h2><span class="tip" data-tip="Breakdown of response codes. 2xx = success, 4xx = client issues, 5xx = server issues.">HTTP Status Mix</span></h2>
+    <table class="status-table">
+      <thead><tr><th>Status</th><th>Count</th></tr></thead>
+      <tbody id="statusBody"></tbody>
+    </table>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p>Gamers Network &copy; 2026</p>
+  <p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
+</footer>
+
+<script>
+function fmtBytes(n) {
+  const v = Number(n || 0);
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(2)} MB`;
+}
+function fmtUptime(sec) {
+  let s = Math.max(0, Number(sec || 0));
+  const d = Math.floor(s / 86400); s -= d * 86400;
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${Math.floor(s)}s`;
+  return `${Math.floor(s)}s`;
+}
+
+const CHART_MAX = 60;
+const chartHist = {
+  mem: [],
+  req: [],
+  latAvg: [],
+  latP95: [],
+  inKb: [],
+  outKb: [],
+};
+
+function pushHist(arr, value) {
+  arr.push(Number(value || 0));
+  if (arr.length > CHART_MAX) arr.shift();
+}
+
+function drawChart(canvasId, seriesList, colors) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ratio = window.devicePixelRatio || 1;
+  const cssW = Math.max(280, canvas.clientWidth || 420);
+  const cssH = 160;
+  canvas.width = Math.floor(cssW * ratio);
+  canvas.height = Math.floor(cssH * ratio);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const padL = 34, padR = 10, padT = 10, padB = 20;
+  const w = cssW - padL - padR;
+  const h = cssH - padT - padB;
+  if (w <= 0 || h <= 0) return;
+
+  let all = [];
+  seriesList.forEach(s => { all = all.concat(s); });
+  const maxY = Math.max(1, ...all);
+
+  ctx.strokeStyle = "rgba(148,163,184,.28)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (h * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + w, y);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "11px sans-serif";
+  ctx.fillText(String(Math.round(maxY)), 6, padT + 3);
+  ctx.fillText("0", 16, padT + h + 3);
+
+  seriesList.forEach((series, si) => {
+    if (!series.length) return;
+    ctx.strokeStyle = colors[si] || "#38bdf8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    series.forEach((v, i) => {
+      const x = padL + (i * w) / Math.max(1, CHART_MAX - 1);
+      const y = padT + h - (Math.max(0, Number(v || 0)) / maxY) * h;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+}
+
+function refreshCharts() {
+  drawChart("chartMem", [chartHist.mem], ["#38bdf8"]);
+  drawChart("chartReq", [chartHist.req], ["#22c55e"]);
+  drawChart("chartLat", [chartHist.latAvg, chartHist.latP95], ["#38bdf8", "#f59e0b"]);
+  drawChart("chartIo", [chartHist.inKb, chartHist.outKb], ["#38bdf8", "#22c55e"]);
+
+  const last = (arr) => (arr.length ? arr[arr.length - 1] : 0);
+  const avg = (arr) => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length) : 0;
+  document.getElementById("chartMemMeta").innerText = `Now ${last(chartHist.mem).toFixed(1)} MB • Avg ${avg(chartHist.mem).toFixed(1)} MB`;
+  document.getElementById("chartReqMeta").innerText = `Now ${Math.round(last(chartHist.req))}/min • Avg ${avg(chartHist.req).toFixed(1)}/min`;
+  document.getElementById("chartLatMeta").innerText = `Avg ${last(chartHist.latAvg).toFixed(1)}ms • P95 ${last(chartHist.latP95).toFixed(1)}ms`;
+  document.getElementById("chartIoMeta").innerText = `In ${last(chartHist.inKb).toFixed(1)} KB/min • Out ${last(chartHist.outKb).toFixed(1)} KB/min`;
+}
+
+let statusPollInFlight = false;
+let statusPollTimer = null;
+const STATUS_POLL_MS = 2000;
+
+async function pollStatus() {
+  if (statusPollInFlight) return;
+  statusPollInFlight = true;
+  try {
+    const r = await fetch(`/api/platform_status?t=${Date.now()}`, { cache: "no-store" });
+    if (!r.ok) return;
+    const d = await r.json();
+    const rt = d.runtime || {};
+    const probeSummary = d.probe_summary || {};
+
+    document.getElementById("sMem").innerText = `${Number(rt.memory_rss_mb || 0).toFixed(1)} MB`;
+    document.getElementById("sReqMin").innerText = Number(rt.requests_last_minute || 0);
+    document.getElementById("sInMin").innerText = fmtBytes(rt.bytes_in_last_minute || 0);
+    document.getElementById("sOutMin").innerText = fmtBytes(rt.bytes_out_last_minute || 0);
+    document.getElementById("sLatency").innerText = `${Number(rt.avg_latency_ms || 0).toFixed(1)} / ${Number(rt.p95_latency_ms || 0).toFixed(1)} ms`;
+    document.getElementById("sUptime").innerText = fmtUptime(rt.uptime_seconds || 0);
+    document.getElementById("sReqTotal").innerText = Number(rt.requests_total || 0);
+    document.getElementById("sTransferTotal").innerText = `${fmtBytes(rt.bytes_in_total || 0)} / ${fmtBytes(rt.bytes_out_total || 0)}`;
+    document.getElementById("sProbe").innerText = `${Number(probeSummary.ok || 0)} ok / ${Number(probeSummary.degraded || 0)} deg / ${Number(probeSummary.down || 0)} down`;
+    document.getElementById("sTime").innerText = `Server time: ${d.server_time || "--"}`;
+
+    pushHist(chartHist.mem, Number(rt.memory_rss_mb || 0));
+    pushHist(chartHist.req, Number(rt.requests_last_minute || 0));
+    pushHist(chartHist.latAvg, Number(rt.avg_latency_ms || 0));
+    pushHist(chartHist.latP95, Number(rt.p95_latency_ms || 0));
+    pushHist(chartHist.inKb, Number(rt.bytes_in_last_minute || 0) / 1024.0);
+    pushHist(chartHist.outKb, Number(rt.bytes_out_last_minute || 0) / 1024.0);
+    refreshCharts();
+
+    const probeBody = document.getElementById("probeBody");
+    probeBody.innerHTML = "";
+    (d.probes || []).forEach(row => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${row.name}</td><td>${row.status}</td><td>${row.http_status || "--"}</td><td>${Number(row.latency_ms || 0)}ms</td>`;
+      probeBody.appendChild(tr);
+    });
+    if (!probeBody.innerHTML) {
+      probeBody.innerHTML = `<tr><td colspan="4">No probe data yet.</td></tr>`;
+    }
+
+    const routeBody = document.getElementById("routeBody");
+    routeBody.innerHTML = "";
+    (rt.top_paths || []).forEach(row => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${row.path}</td><td>${Number(row.count || 0)}</td>`;
+      routeBody.appendChild(tr);
+    });
+    if (!routeBody.innerHTML) {
+      routeBody.innerHTML = `<tr><td colspan="2">No route traffic yet.</td></tr>`;
+    }
+
+    const statusBody = document.getElementById("statusBody");
+    statusBody.innerHTML = "";
+    const statusCounts = rt.status_counts || {};
+    Object.keys(statusCounts).sort((a, b) => Number(a) - Number(b)).forEach(code => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${code}</td><td>${Number(statusCounts[code] || 0)}</td>`;
+      statusBody.appendChild(tr);
+    });
+    if (!statusBody.innerHTML) {
+      statusBody.innerHTML = `<tr><td colspan="2">No HTTP status data yet.</td></tr>`;
+    }
+  } catch (_) {
+  } finally {
+    statusPollInFlight = false;
+  }
+}
+
+function startStatusPolling() {
+  if (statusPollTimer) return;
+  pollStatus();
+  statusPollTimer = setInterval(pollStatus, STATUS_POLL_MS);
+}
+
+function stopStatusPolling() {
+  if (!statusPollTimer) return;
+  clearInterval(statusPollTimer);
+  statusPollTimer = null;
+}
+
+startStatusPolling();
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopStatusPolling();
+  else startStatusPolling();
+});
+window.addEventListener("resize", refreshCharts);
+</script>
+<script src="{{ url_for('static', filename='live_broadcast.js') }}"></script>
+</body>
+</html>

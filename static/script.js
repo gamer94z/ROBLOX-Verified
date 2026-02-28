@@ -13,6 +13,13 @@ const evidenceOverlay = document.getElementById("evidenceOverlay");
 const evidenceCloseBtn = document.getElementById("evidenceCloseBtn");
 const evidenceTitle = document.getElementById("evidenceTitle");
 const evidenceBody = document.getElementById("evidenceBody");
+const timelineOverlay = document.getElementById("timelineOverlay");
+const timelineCloseBtn = document.getElementById("timelineCloseBtn");
+const timelineTitle = document.getElementById("timelineTitle");
+const timelineBody = document.getElementById("timelineBody");
+const compareOverlay = document.getElementById("compareOverlay");
+const compareCloseBtn = document.getElementById("compareCloseBtn");
+const compareBody = document.getElementById("compareBody");
 const quickHelpToggle = document.getElementById("quickHelpToggle");
 const quickHelpPanel = document.getElementById("quickHelpPanel");
 let pageLoadHideTimer = null;
@@ -22,13 +29,16 @@ let breachAudioEl = null;
 let breachPlaying = false;
 let breachHideTimer = null;
 let pendingAutoReload = false;
+const compareSelection = [];
 
 function isUiBusyForReload() {
     const activeModal = document.querySelector(".modal.show");
     const evidenceOpen = !!(evidenceOverlay && !evidenceOverlay.classList.contains("hidden"));
+    const timelineOpen = !!(timelineOverlay && !timelineOverlay.classList.contains("hidden"));
+    const compareOpen = !!(compareOverlay && !compareOverlay.classList.contains("hidden"));
     const breachOpen = !!(breachOverlayEl && !breachOverlayEl.classList.contains("hidden"));
     const settingsOpen = !!(settingsModal && !settingsModal.classList.contains("hidden"));
-    return !!(activeModal || evidenceOpen || breachPlaying || breachOpen || settingsOpen);
+    return !!(activeModal || evidenceOpen || timelineOpen || compareOpen || breachPlaying || breachOpen || settingsOpen);
 }
 
 function tryRunDeferredReload() {
@@ -389,6 +399,26 @@ function closeEvidenceOverlay() {
     evidenceOverlay.classList.add("hidden");
 }
 
+function closeTimelineOverlay() {
+    if (!timelineOverlay) return;
+    timelineOverlay.classList.add("hidden");
+}
+
+function closeCompareOverlay() {
+    if (!compareOverlay) return;
+    compareOverlay.classList.add("hidden");
+}
+
+function closeAllProfileModals() {
+    document.querySelectorAll(".modal.show").forEach((m) => {
+        m.classList.remove("show");
+        const mc = m.querySelector(".modal-content");
+        if (mc) mc.classList.remove("is-loading");
+        const notice = m.querySelector(".mlg-warning-under-modal");
+        if (notice) notice.classList.remove("show");
+    });
+}
+
 async function openEvidenceOverlay(uid, username) {
     if (!evidenceOverlay || !evidenceBody || !evidenceTitle) return;
     evidenceOverlay.classList.remove("hidden");
@@ -424,6 +454,97 @@ async function openEvidenceOverlay(uid, username) {
     } catch (err) {
         evidenceBody.innerHTML = `<div class="evidence-empty">${err?.message || "Unable to load evidence."}</div>`;
     }
+}
+
+async function openTimelineOverlay(uid, username) {
+    if (!timelineOverlay || !timelineBody || !timelineTitle) return;
+    timelineOverlay.classList.remove("hidden");
+    timelineTitle.innerText = `Timeline - ${username} (${uid})`;
+    timelineBody.innerHTML = '<div class="evidence-empty">Loading timeline...</div>';
+    try {
+        const res = await fetch(`/api/profile_timeline/${uid}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load timeline");
+        const items = Array.isArray(data.timeline) ? data.timeline : [];
+        if (!items.length) {
+            timelineBody.innerHTML = '<div class="evidence-empty">No timeline events available yet.</div>';
+            return;
+        }
+        timelineBody.innerHTML = "";
+        items.forEach((item) => {
+            const row = document.createElement("div");
+            row.className = "timeline-row";
+            const when = item.ts ? new Date(item.ts * 1000).toLocaleString() : "Unknown";
+            row.innerHTML = `
+                <div class="top"><span>${item.type || "event"}</span><span>${when}</span></div>
+                <div class="title">${item.title || "Update"}</div>
+                ${item.detail ? `<div class="detail">${item.detail}</div>` : ""}
+            `;
+            timelineBody.appendChild(row);
+        });
+    } catch (err) {
+        timelineBody.innerHTML = `<div class="evidence-empty">${err?.message || "Unable to load timeline."}</div>`;
+    }
+}
+
+function fetchUserModalAsync(uid) {
+    return new Promise((resolve) => {
+        fetchUserModal(uid, (data) => resolve(data || null));
+    });
+}
+
+function compareSlotHtml(data, uid) {
+    if (!data) return `<div class="compare-col"><div class="compare-empty">Unable to load profile ${uid}.</div></div>`;
+    const srcBadge = data.stored?.source === "Seed List" ? "Seed List" : "Newly Added";
+    const bought = data.stored?.bought_tag ? '<span class="compare-pill">Bought Check</span>' : "";
+    const star = data.is_star_creator ? '<span class="compare-pill">Star Creator</span>' : "";
+    const manual = data.stored?.manual_add ? '<span class="compare-pill">Manual Add</span>' : "";
+    const evidence = Number(userDataCache[uid]?.evidence_count || 0);
+    const evidenceTag = evidence > 0 ? `<span class="compare-pill">Evidence ${evidence}</span>` : "";
+    return `
+      <div class="compare-col">
+        <img src="${data.avatar_url || AVATAR_PLACEHOLDER}" alt="${data.stored?.username || uid}">
+        <h4>${data.stored?.username || "Unknown"} (${uid})</h4>
+        <div class="compare-grid">
+          <div><span class="k">Display</span><span class="v">${data.live?.displayName || "N/A"}</span></div>
+          <div><span class="k">Joined</span><span class="v">${data.live?.joined || "N/A"}</span></div>
+          <div><span class="k">Followers</span><span class="v">${data._partial ? "N/A" : data.stats.followers}</span></div>
+          <div><span class="k">Friends</span><span class="v">${data._partial ? "N/A" : data.stats.friends}</span></div>
+          <div><span class="k">Following</span><span class="v">${data._partial ? "N/A" : data.stats.following}</span></div>
+          <div><span class="k">Source</span><span class="v">${srcBadge}</span></div>
+        </div>
+        <div class="compare-meta">${bought}${star}${manual}${evidenceTag}</div>
+      </div>
+    `;
+}
+
+async function renderCompareOverlay() {
+    if (!compareOverlay || !compareBody) return;
+    compareOverlay.classList.remove("hidden");
+    if (!compareSelection.length) {
+        compareBody.innerHTML = `<div class="compare-empty">Select up to 2 users from profile modals to compare.</div>`;
+        return;
+    }
+    compareBody.innerHTML = `<div class="compare-empty">Loading comparison...</div>`;
+    const slots = compareSelection.slice(0, 2);
+    const loaded = await Promise.all(slots.map(uid => fetchUserModalAsync(uid)));
+    const columns = loaded.map((d, idx) => compareSlotHtml(d, slots[idx]));
+    while (columns.length < 2) {
+        columns.push(`<div class="compare-col"><div class="compare-empty">Open another profile and click Compare to fill this slot.</div></div>`);
+    }
+    compareBody.innerHTML = columns.join("");
+}
+
+async function toggleCompareUid(uid) {
+    const uidText = String(uid);
+    const idx = compareSelection.indexOf(uidText);
+    if (idx >= 0) {
+        compareSelection.splice(idx, 1);
+    } else {
+        if (compareSelection.length >= 2) compareSelection.shift();
+        compareSelection.push(uidText);
+    }
+    await renderCompareOverlay();
 }
 
 function updatePageLoadUI(stageText, loaded, total) {
@@ -880,6 +1001,8 @@ function setupCardModal(card, uid) {
     const pSource = modal.querySelector("p");
     const extra = modal.querySelector(".extra-info");
     const profileBtn = modal.querySelector(".profile-btn");
+    const timelineBtn = modal.querySelector(".timeline-btn");
+    const compareBtn = modal.querySelector(".compare-btn");
     const evidenceBtn = modal.querySelector(".evidence-btn");
 
     const showMlgDisabledNotice = () => {
@@ -907,6 +1030,8 @@ function setupCardModal(card, uid) {
         modalContent.classList.add("is-loading");
         header.innerHTML = ""; pSource.innerHTML = ""; extra.innerHTML = "";
         profileBtn.style.display = "none";
+        if (timelineBtn) timelineBtn.style.display = "none";
+        if (compareBtn) compareBtn.style.display = "none";
         if (evidenceBtn) evidenceBtn.style.display = "none";
 
         if (loadingIndicator) loadingIndicator.style.display = "flex";
@@ -921,6 +1046,8 @@ function setupCardModal(card, uid) {
             if (!data) {
                 modalContent.classList.remove("is-loading");
                 profileBtn.style.display = "none";
+                if (timelineBtn) timelineBtn.style.display = "none";
+                if (compareBtn) compareBtn.style.display = "none";
                 if (evidenceBtn) evidenceBtn.style.display = "none";
                 extra.innerHTML = "Error loading user";
                 return;
@@ -955,6 +1082,20 @@ function setupCardModal(card, uid) {
 
             profileBtn.href = data.profile_url;
             profileBtn.style.display = "inline-block";
+            if (timelineBtn) {
+                timelineBtn.style.display = "inline-block";
+                timelineBtn.onclick = () => {
+                    closeAllProfileModals();
+                    openTimelineOverlay(uid, data.stored?.username || uid);
+                };
+            }
+            if (compareBtn) {
+                compareBtn.style.display = "inline-block";
+                compareBtn.onclick = () => {
+                    closeAllProfileModals();
+                    toggleCompareUid(uid);
+                };
+            }
             if (evidenceBtn) {
                 if (data.stored?.bought_tag) {
                     evidenceBtn.style.display = "inline-block";
@@ -1020,9 +1161,25 @@ evidenceOverlay?.addEventListener("click", (e) => {
         setTimeout(tryRunDeferredReload, 60);
     }
 });
+timelineCloseBtn?.addEventListener("click", closeTimelineOverlay);
+timelineOverlay?.addEventListener("click", (e) => {
+    if (e.target === timelineOverlay) {
+        closeTimelineOverlay();
+        setTimeout(tryRunDeferredReload, 60);
+    }
+});
+compareCloseBtn?.addEventListener("click", closeCompareOverlay);
+compareOverlay?.addEventListener("click", (e) => {
+    if (e.target === compareOverlay) {
+        closeCompareOverlay();
+        setTimeout(tryRunDeferredReload, 60);
+    }
+});
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         closeEvidenceOverlay();
+        closeTimelineOverlay();
+        closeCompareOverlay();
         document.querySelectorAll(".modal.show").forEach(m => m.classList.remove("show"));
         setTimeout(tryRunDeferredReload, 60);
     }
@@ -1165,10 +1322,12 @@ async function pollLiveStatus() {
         }
 
         if (lastDbMtime !== null && status.db_mtime !== lastDbMtime) {
-            if (isUiBusyForReload()) {
-                pendingAutoReload = true;
-            } else {
-                window.location.reload();
+            if (!window.__DEV_PAUSE_AUTO_REFRESH) {
+                if (isUiBusyForReload()) {
+                    pendingAutoReload = true;
+                } else {
+                    window.location.reload();
+                }
             }
             return;
         }

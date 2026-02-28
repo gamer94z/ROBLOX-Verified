@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gamers Network | Developer Access</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="main-app dark-mode">
+<header>
+  <h1>Developer Access</h1>
+  <p>Restricted area</p>
+</header>
+
+<main class="admin-auth-main">
+  <section class="panel admin-auth-card">
+    <div class="admin-auth-head">
+      <div class="admin-auth-icon">D</div>
+      <h2>Developer Page Login</h2>
+    </div>
+    <p class="admin-auth-sub">Enter the developer password to continue.</p>
+    {% if error %}
+      <p class="admin-auth-error">{{ error }}</p>
+    {% endif %}
+    <form method="post" class="admin-auth-form">
+      <input class="admin-auth-input" type="password" name="password" placeholder="Developer password" required style="min-height: auto;">
+      <button class="admin-auth-btn" type="submit">Enter Developer Page</button>
+    </form>
+  </section>
+</main>
+</body>
+</html>

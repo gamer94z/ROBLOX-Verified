@@ -102,6 +102,38 @@ body.monitor-page {
 .mini-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
 .mini-table th, .mini-table td { border-bottom:1px solid #1f2937; padding:0.35rem; text-align:left; }
 .mini-table th { color:#7dd3fc; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; }
+#cornerSettingsBtn {
+    right: 14px !important;
+    z-index: 1300 !important;
+    pointer-events: auto !important;
+}
+#settings-modal {
+    z-index: 2400 !important;
+    top: 68px !important;
+    right: 14px !important;
+    left: auto !important;
+    bottom: auto !important;
+}
+#settings-modal .settings-header {
+    touch-action: none;
+}
+#settings-modal .settings-group {
+    display: block !important;
+}
+#settings-modal .settings-label {
+    display: block !important;
+    opacity: 1 !important;
+}
+#settings-modal .settings-theme-row {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+#settings-modal .settings-theme-btn {
+    min-height: 38px;
+    border-radius: 10px;
+    font-weight: 700;
+}
 body.monitor-page:not(.dark-mode) {
     background: radial-gradient(circle at 10% -10%, rgba(14,165,233,0.12), transparent 45%), #f8fbff;
     color: #0f172a;
@@ -172,7 +204,7 @@ body.monitor-page:not(.dark-mode) .pill {
 <a class="admin-corner-btn settings-corner-btn" href="{{ url_for('admin') }}" title="Admin Panel" aria-label="Open Admin Panel">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2L4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5l-8-3zm0 2.2l6 2.3V11c0 4.2-2.7 8.2-6 9.2-3.3-1-6-5-6-9.2V6.5l6-2.3z" fill="currentColor"/></svg>
 </a>
-<button class="admin-corner-btn" id="cornerSettingsBtn" title="Settings" aria-label="Open Settings" type="button">
+<button class="admin-corner-btn" id="cornerSettingsBtn" title="Settings" aria-label="Open Settings" type="button" onclick="(function(){var m=document.getElementById('settings-modal');if(!m)return false;var hidden=m.classList.contains('hidden');if(hidden){m.style.setProperty('position','fixed','important');m.style.setProperty('top','68px','important');m.style.setProperty('right','14px','important');m.style.setProperty('left','auto','important');m.style.setProperty('bottom','auto','important');m.classList.remove('hidden');m.style.display='block';setTimeout(function(){m.classList.add('is-open');},10);}else{m.classList.remove('is-open');m.classList.add('hidden');m.style.display='';}return false;})();">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.13-.54 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z" fill="currentColor"/></svg>
 </button>
 
@@ -281,13 +313,13 @@ body.monitor-page:not(.dark-mode) .pill {
 </footer>
 
 <div id="settings-modal" class="settings-modal hidden">
-    <div class="settings-header">Control Center <span id="closeSettings">&times;</span></div>
+    <div class="settings-header">Control Center <span id="closeSettings" onclick="(function(){var m=document.getElementById('settings-modal');if(!m)return false;m.classList.remove('is-open');m.classList.add('hidden');m.style.display='';return false;})()">&times;</span></div>
     <div class="settings-body">
         <div class="settings-group">
             <p class="settings-label">Theme</p>
-            <div class="settings-row">
-                <button id="lightModeBtn" class="settings-btn" type="button">Light</button>
-                <button id="darkModeBtn" class="settings-btn" type="button">Dark</button>
+            <div class="settings-row settings-theme-row">
+                <button id="lightModeBtn" class="settings-btn settings-theme-btn" type="button">Light</button>
+                <button id="darkModeBtn" class="settings-btn settings-theme-btn" type="button">Dark</button>
             </div>
         </div>
         <button id="resetSettingsBtn" class="settings-reset" type="button">Reset Theme</button>
@@ -303,29 +335,180 @@ body.monitor-page:not(.dark-mode) .pill {
     const darkModeBtn = document.getElementById("darkModeBtn");
     const lightModeBtn = document.getElementById("lightModeBtn");
     const resetSettingsBtn = document.getElementById("resetSettingsBtn");
-    const storedTheme = localStorage.getItem("theme");
+    let openTimer = null;
+    let closeTimer = null;
+    let settingsDragged = false;
 
+    const readTheme = () => {
+        try { return localStorage.getItem("theme"); } catch (_) { return null; }
+    };
+    const writeTheme = (theme) => {
+        try { localStorage.setItem("theme", theme); } catch (_) {}
+    };
+
+    const storedTheme = readTheme();
     if (storedTheme === "dark" || storedTheme === "light") {
         body.classList.toggle("dark-mode", storedTheme === "dark");
     }
 
-    cornerSettingsBtn?.addEventListener("click", () => settingsModal?.classList.toggle("hidden"));
-    closeSettings?.addEventListener("click", () => settingsModal?.classList.add("hidden"));
+    function openSettingsModal() {
+        if (!settingsModal) return;
+        if (!settingsDragged) dockSettingsTopRight();
+        if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+        }
+        settingsModal.style.display = "block";
+        settingsModal.classList.remove("hidden");
+        if (openTimer) clearTimeout(openTimer);
+        openTimer = setTimeout(() => settingsModal.classList.add("is-open"), 10);
+    }
+
+    function closeSettingsModal() {
+        if (!settingsModal) return;
+        if (openTimer) {
+            clearTimeout(openTimer);
+            openTimer = null;
+        }
+        settingsModal.classList.remove("is-open");
+        if (closeTimer) clearTimeout(closeTimer);
+        closeTimer = setTimeout(() => {
+            settingsModal.classList.add("hidden");
+            settingsModal.style.display = "";
+        }, 220);
+    }
+
+    function toggleSettingsModal() {
+        if (!settingsModal) return;
+        if (settingsModal.classList.contains("hidden")) openSettingsModal();
+        else closeSettingsModal();
+    }
+
+    function dockSettingsTopRight() {
+        if (!settingsModal) return;
+        settingsModal.style.setProperty("position", "fixed", "important");
+        settingsModal.style.setProperty("top", "68px", "important");
+        settingsModal.style.setProperty("right", "14px", "important");
+        settingsModal.style.setProperty("left", "auto", "important");
+        settingsModal.style.setProperty("bottom", "auto", "important");
+    }
+
+    function placeSettingsNearButton() {
+        if (!settingsModal || !cornerSettingsBtn) return;
+        const btn = cornerSettingsBtn.getBoundingClientRect();
+        const modalW = Math.min(360, Math.max(260, window.innerWidth - 24));
+        const x = Math.max(8, Math.min(window.innerWidth - modalW - 8, btn.right - modalW));
+        const y = Math.max(8, Math.min(window.innerHeight - 120, btn.bottom + 8));
+        settingsModal.style.left = `${x}px`;
+        settingsModal.style.top = `${y}px`;
+        settingsModal.style.right = "auto";
+        settingsModal.style.bottom = "auto";
+    }
+
+    function attachSettingsDrag() {
+        if (!settingsModal) return;
+        const settingsHeader = settingsModal.querySelector(".settings-header");
+        if (!settingsHeader) return;
+        let dragging = false;
+        let pointerId = null;
+        let offsetX = 0;
+        let offsetY = 0;
+        let mouseDragging = false;
+
+        settingsHeader.addEventListener("pointerdown", (e) => {
+            if (e.target && e.target.id === "closeSettings") return;
+            dragging = true;
+            pointerId = e.pointerId;
+            settingsDragged = true;
+            const rect = settingsModal.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            settingsModal.style.setProperty("right", "auto", "important");
+            settingsModal.style.setProperty("bottom", "auto", "important");
+            settingsModal.style.setProperty("left", `${rect.left}px`, "important");
+            settingsModal.style.setProperty("top", `${rect.top}px`, "important");
+            settingsHeader.setPointerCapture?.(e.pointerId);
+            e.preventDefault();
+        });
+
+        document.addEventListener("pointermove", (e) => {
+            if (!dragging) return;
+            if (pointerId !== null && e.pointerId !== pointerId) return;
+            const maxLeft = Math.max(8, window.innerWidth - settingsModal.offsetWidth - 8);
+            const maxTop = Math.max(8, window.innerHeight - settingsModal.offsetHeight - 8);
+            const left = Math.min(maxLeft, Math.max(8, e.clientX - offsetX));
+            const top = Math.min(maxTop, Math.max(8, e.clientY - offsetY));
+            settingsModal.style.setProperty("left", `${left}px`, "important");
+            settingsModal.style.setProperty("top", `${top}px`, "important");
+            settingsModal.style.setProperty("right", "auto", "important");
+            settingsModal.style.setProperty("bottom", "auto", "important");
+            e.preventDefault();
+        });
+
+        function stopDrag() {
+            dragging = false;
+            pointerId = null;
+        }
+        document.addEventListener("pointerup", stopDrag);
+        document.addEventListener("pointercancel", stopDrag);
+
+        settingsHeader.addEventListener("mousedown", (e) => {
+            if (e.target && e.target.id === "closeSettings") return;
+            mouseDragging = true;
+            settingsDragged = true;
+            const rect = settingsModal.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            settingsModal.style.setProperty("right", "auto", "important");
+            settingsModal.style.setProperty("bottom", "auto", "important");
+            settingsModal.style.setProperty("left", `${rect.left}px`, "important");
+            settingsModal.style.setProperty("top", `${rect.top}px`, "important");
+            e.preventDefault();
+        });
+        document.addEventListener("mousemove", (e) => {
+            if (!mouseDragging) return;
+            const maxLeft = Math.max(8, window.innerWidth - settingsModal.offsetWidth - 8);
+            const maxTop = Math.max(8, window.innerHeight - settingsModal.offsetHeight - 8);
+            const left = Math.min(maxLeft, Math.max(8, e.clientX - offsetX));
+            const top = Math.min(maxTop, Math.max(8, e.clientY - offsetY));
+            settingsModal.style.setProperty("left", `${left}px`, "important");
+            settingsModal.style.setProperty("top", `${top}px`, "important");
+            settingsModal.style.setProperty("right", "auto", "important");
+            settingsModal.style.setProperty("bottom", "auto", "important");
+        });
+        document.addEventListener("mouseup", () => {
+            mouseDragging = false;
+        });
+    }
+
+    window.__openMonitorSettings = openSettingsModal;
+    window.__toggleMonitorSettings = toggleSettingsModal;
+    window.__dockMonitorSettings = dockSettingsTopRight;
+    attachSettingsDrag();
+
+    closeSettings?.addEventListener("click", closeSettingsModal);
+    settingsModal?.addEventListener("click", (e) => {
+        if (e.target === settingsModal) closeSettingsModal();
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeSettingsModal();
+    });
 
     darkModeBtn?.addEventListener("click", () => {
         body.classList.add("dark-mode");
-        localStorage.setItem("theme", "dark");
+        writeTheme("dark");
     });
     lightModeBtn?.addEventListener("click", () => {
         body.classList.remove("dark-mode");
-        localStorage.setItem("theme", "light");
+        writeTheme("light");
     });
     resetSettingsBtn?.addEventListener("click", () => {
         body.classList.remove("dark-mode");
-        localStorage.setItem("theme", "light");
+        writeTheme("light");
     });
 })();
-
+</script>
+<script>
 let lastEventId = 0;
 let eventsBootstrapped = false;
 let eventQueue = [];
@@ -618,5 +801,6 @@ setInterval(() => {
     pollEvents();
 }, 1500);
 </script>
+<script src="{{ url_for('static', filename='live_broadcast.js') }}"></script>
 </body>
 </html>

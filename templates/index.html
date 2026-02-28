@@ -41,6 +41,11 @@
         <path d="M12 2L4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5l-8-3zm0 2.2l6 2.3V11c0 4.2-2.7 8.2-6 9.2-3.3-1-6-5-6-9.2V6.5l6-2.3zm-1.2 5.3h2.4v5.2h-2.4V9.5zm0 6.3h2.4v2.2h-2.4v-2.2z" fill="currentColor"/>
     </svg>
 </a>
+<a class="admin-corner-btn dev-corner-btn" href="{{ url_for('developer') }}" title="Developer Page" aria-label="Open Developer Page">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M8.7 17.3L3.4 12l5.3-5.3 1.4 1.4L6.2 12l3.9 3.9-1.4 1.4zm6.6 0l-1.4-1.4 3.9-3.9-3.9-3.9 1.4-1.4 5.3 5.3-5.3 5.3zM13 4l-3 16h-2l3-16h2z" fill="currentColor"/>
+    </svg>
+</a>
 
 <section class="index-top-stack">
 <section class="index-command-grid">
@@ -291,6 +296,8 @@
                 <div class="extra-info"></div>
                 <div class="modal-actions">
                     <a class="profile-btn" href="#" target="_blank">Open Profile</a>
+                    <button class="timeline-btn" type="button">Timeline</button>
+                    <button class="compare-btn" type="button">Compare</button>
                     <button class="evidence-btn" type="button" style="display:none;">View Evidence</button>
                 </div>
             </div>
@@ -376,6 +383,22 @@
     </div>
 </div>
 
+<div id="timelineOverlay" class="evidence-overlay hidden">
+    <div class="evidence-panel timeline-panel">
+        <button id="timelineCloseBtn" class="evidence-close" type="button" aria-label="Close timeline panel">&times;</button>
+        <h3 id="timelineTitle">Profile Timeline</h3>
+        <div id="timelineBody" class="evidence-body"></div>
+    </div>
+</div>
+
+<div id="compareOverlay" class="evidence-overlay hidden">
+    <div class="evidence-panel compare-panel">
+        <button id="compareCloseBtn" class="evidence-close" type="button" aria-label="Close compare panel">&times;</button>
+        <h3 id="compareTitle">Compare Profiles</h3>
+        <div id="compareBody" class="compare-body"></div>
+    </div>
+</div>
+
 {% include "_policy_articles.html" %}
 
 <footer class="site-footer">
@@ -446,6 +469,7 @@ document.getElementById("jumpPageBtn").addEventListener("click", function() {
 });
 </script>
 
+<script src="{{ url_for('static', filename='live_broadcast.js') }}"></script>
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

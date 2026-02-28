@@ -1114,6 +1114,9 @@ body.home-gated header {
     bottom: auto;
     z-index: 3000 !important;
 }
+#settings-modal .settings-header {
+    touch-action: none;
+}
 @media (max-width: 820px) {
     #settings-modal.settings-modal {
         top: 66px;
@@ -1329,6 +1332,20 @@ footer {
                 <div class="notes-item"><span class="k">Data Source</span><span class="v">Public Roblox API endpoints</span></div>
             </div>
         </section>
+        <section class="dashboard-panel">
+            <h2>Public Changelog Feed</h2>
+            <div class="notes-list" id="homeChangelogList">
+                <div class="notes-item"><span class="k">Loading</span><span class="v">Fetching latest updates...</span></div>
+            </div>
+            <div style="margin-top:.55rem;">
+                <a class="compact-route" style="max-width:260px;" href="{{ url_for('changelog_page') }}">
+                    <div><strong>Open Full Changelog</strong><span>View all public updates</span></div><b>C</b>
+                </a>
+                <a class="compact-route" style="max-width:260px; margin-top:.4rem;" href="{{ url_for('api_status_page') }}">
+                    <div><strong>API Status</strong><span>Inspect endpoint health</span></div><b>A</b>
+                </a>
+            </div>
+        </section>
     </div>
 </section>
 
@@ -1446,6 +1463,7 @@ const resetSettingsBtn = document.getElementById("resetSettingsBtn");
 
 function openSettingsModal() {
     if (!settingsModal) return;
+    placeSettingsNearButton();
     settingsModal.style.display = "block";
     settingsModal.classList.remove("hidden");
     void settingsModal.offsetWidth;
@@ -1465,6 +1483,18 @@ function setTheme(theme) {
     const isDark = theme === "dark";
     document.body.classList.toggle("dark-mode", isDark);
     try { localStorage.setItem("theme", isDark ? "dark" : "light"); } catch (_) {}
+}
+
+function placeSettingsNearButton() {
+    if (!settingsModal || !cornerSettingsBtn) return;
+    const btn = cornerSettingsBtn.getBoundingClientRect();
+    const modalW = Math.min(360, Math.max(260, window.innerWidth - 24));
+    const x = Math.max(8, Math.min(window.innerWidth - modalW - 8, btn.right - modalW));
+    const y = Math.max(8, Math.min(window.innerHeight - 120, btn.bottom + 8));
+    settingsModal.style.left = `${x}px`;
+    settingsModal.style.top = `${y}px`;
+    settingsModal.style.right = "auto";
+    settingsModal.style.bottom = "auto";
 }
 
 cornerSettingsBtn?.addEventListener("click", () => {
@@ -1487,28 +1517,42 @@ document.addEventListener("keydown", (e) => {
 // Draggable settings modal on home page
 if (settingsModal) {
     let dragging = false;
+    let pointerId = null;
     let offsetX = 0;
     let offsetY = 0;
     const settingsHeader = settingsModal.querySelector(".settings-header");
 
-    settingsHeader?.addEventListener("mousedown", (e) => {
+    settingsHeader?.addEventListener("pointerdown", (e) => {
+        if (e.target && e.target.id === "closeSettings") return;
         dragging = true;
+        pointerId = e.pointerId;
         const rect = settingsModal.getBoundingClientRect();
         offsetX = e.clientX - rect.left;
         offsetY = e.clientY - rect.top;
+        settingsHeader.setPointerCapture?.(e.pointerId);
+        e.preventDefault();
     });
 
-    document.addEventListener("mousemove", (e) => {
+    document.addEventListener("pointermove", (e) => {
+        if (pointerId !== null && e.pointerId !== pointerId) return;
         if (!dragging) return;
-        settingsModal.style.left = `${Math.max(8, e.clientX - offsetX)}px`;
-        settingsModal.style.top = `${Math.max(8, e.clientY - offsetY)}px`;
+        const maxLeft = Math.max(8, window.innerWidth - settingsModal.offsetWidth - 8);
+        const maxTop = Math.max(8, window.innerHeight - settingsModal.offsetHeight - 8);
+        const left = Math.min(maxLeft, Math.max(8, e.clientX - offsetX));
+        const top = Math.min(maxTop, Math.max(8, e.clientY - offsetY));
+        settingsModal.style.left = `${left}px`;
+        settingsModal.style.top = `${top}px`;
         settingsModal.style.right = "auto";
         settingsModal.style.bottom = "auto";
+        e.preventDefault();
     });
 
-    document.addEventListener("mouseup", () => {
+    function stopDragging() {
         dragging = false;
-    });
+        pointerId = null;
+    }
+    document.addEventListener("pointerup", stopDragging);
+    document.addEventListener("pointercancel", stopDragging);
 }
 
 function loadRecentActivity() {
@@ -1661,6 +1705,31 @@ function updateLiveStatus() {
         .catch(() => {});
 }
 
+function loadHomeChangelog() {
+    const list = document.getElementById("homeChangelogList");
+    if (!list) return;
+    fetch(`/api/changelog?limit=3&t=${Date.now()}`, { cache: "no-store" })
+        .then(r => r.json())
+        .then(data => {
+            const items = (Array.isArray(data.items) ? data.items : []).slice(0, 3);
+            if (!items.length) {
+                list.innerHTML = `<div class="notes-item"><span class="k">No updates</span><span class="v">No changelog entries yet.</span></div>`;
+                return;
+            }
+            list.innerHTML = "";
+            items.forEach(item => {
+                const row = document.createElement("div");
+                row.className = "notes-item";
+                const when = item.ts ? new Date(item.ts * 1000).toLocaleDateString() : "--";
+                row.innerHTML = `<span class="k">${item.kind || "update"} • ${when}</span><span class="v">${item.title || "Update"}</span>`;
+                list.appendChild(row);
+            });
+        })
+        .catch(() => {
+            list.innerHTML = `<div class="notes-item"><span class="k">Unavailable</span><span class="v">Could not load changelog feed.</span></div>`;
+        });
+}
+
 let homeBooted = false;
 function bootHomePage() {
     if (homeBooted) return;
@@ -1670,11 +1739,13 @@ function bootHomePage() {
     setupDevCard();
     loadRecentActivity();
     loadRecentBought();
+    loadHomeChangelog();
     updateLiveStatus();
 
     setInterval(updateLiveStatus, 15000);
     setInterval(loadRecentActivity, 15000);
     setInterval(loadRecentBought, 15000);
+    setInterval(loadHomeChangelog, 30000);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1682,5 +1753,6 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
+<script src="{{ url_for('static', filename='live_broadcast.js') }}"></script>
 </body>
 </html>

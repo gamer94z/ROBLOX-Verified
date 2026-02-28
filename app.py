@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
 import datetime
 import requests
 import math
@@ -6,6 +6,7 @@ import time
 import os
 import logging
 import threading
+import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from database import (
@@ -51,6 +52,7 @@ USERS_PER_PAGE = 30
 CACHE_EXPIRY = 3600
 DEV_UID = "10006170169"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+DEVELOPER_PASSWORD = os.environ.get("DEVELOPER_PASSWORD", "changeme-dev")
 AUTO_SYNC_ENABLED = os.environ.get("AUTO_SYNC_ENABLED", "1") == "1"
 AUTO_SYNC_INTERVAL_SECONDS = max(
     60, int(os.environ.get("AUTO_SYNC_INTERVAL_SECONDS", "600"))
@@ -68,6 +70,7 @@ AUTO_SYNC_FRONTIER_BATCH = max(50, int(os.environ.get("AUTO_SYNC_FRONTIER_BATCH"
 AUTO_SYNC_FRONTIER_RECHECK_COOLDOWN = max(
     3600, int(os.environ.get("AUTO_SYNC_FRONTIER_RECHECK_COOLDOWN", str(7 * 24 * 60 * 60)))
 )
+SEED_MATURATION_SECONDS = 14 * 24 * 60 * 60
 
 GROUPS = {
     1200769: "Official Roblox Group",
@@ -75,6 +78,26 @@ GROUPS = {
     3514227: "DevForum Community",
 }
 EXCLUDED_USERNAMES = {"roblox", "builderman"}
+PUBLIC_CHANGELOG = [
+    {
+        "created_ts": int(datetime.datetime(2026, 2, 28, 10, 0, 0).timestamp()),
+        "title": "Public Evidence Viewer",
+        "body": "Bought-check profiles now expose linked evidence through a dedicated public viewer.",
+        "kind": "release",
+    },
+    {
+        "created_ts": int(datetime.datetime(2026, 2, 27, 18, 0, 0).timestamp()),
+        "title": "Collector Monitor Upgrade",
+        "body": "Live monitor now shows stage telemetry, API limit tracking, and event stream updates.",
+        "kind": "release",
+    },
+    {
+        "created_ts": int(datetime.datetime(2026, 2, 26, 16, 30, 0).timestamp()),
+        "title": "Manual User Manager",
+        "body": "Admin panel now supports manual add/remove flow with moderation logs.",
+        "kind": "release",
+    },
+]
 
 user_cache = {}
 star_cache = {}
@@ -82,6 +105,19 @@ terminated_cache = {}
 monitor_events = deque(maxlen=250)
 monitor_event_seq = 0
 monitor_event_lock = threading.Lock()
+platform_probe_cache = {"ts": 0, "items": []}
+metrics_lock = threading.Lock()
+runtime_metrics = {
+    "started_ts": int(time.time()),
+    "requests_total": 0,
+    "bytes_in_total": 0,
+    "bytes_out_total": 0,
+    "path_counts": {},
+    "status_counts": {},
+    "latency_ms_recent": deque(maxlen=1200),
+    "request_timestamps": deque(maxlen=4000),
+    "io_recent": deque(maxlen=4000),  # (ts, in_bytes, out_bytes)
+}
 last_seen_db_mtime = None
 api_limit_log_last = {}
 adaptive_backoff_seconds = {
@@ -121,10 +157,34 @@ auto_sync_state = {
     "api_limit_total": 0,
     "api_limit_hit_timestamps": [],
     "api_endpoints": {},
+    "broadcast_id": 0,
+    "broadcast_message": "",
+    "broadcast_type": "info",
+    "broadcast_until_ts": 0,
+    "broadcast_created_ts": 0,
+    "broadcast_created_by": "developer",
+    "dev_message_queue": [],
+    "dev_message_history": [],
+    "dev_feature_flags": {
+        "disable_animations": False,
+        "hide_star_badges": False,
+        "pause_auto_refresh": False,
+    },
+    "dev_emergency_banner": {
+        "enabled": False,
+        "text": "",
+        "type": "warn",
+        "until_ts": 0,
+        "updated_ts": 0,
+    },
 }
 auto_sync_thread_started = False
 bootstrap_sync_done = False
 last_state_persist_ts = 0.0
+presence_lock = threading.Lock()
+client_presence = {}
+allowed_dev_targets = {"all", "home", "index", "database", "monitor", "api_status", "changelog"}
+priority_rank = {"low": 0, "normal": 1, "high": 2}
 PERSISTED_SYNC_KEYS = (
     "enabled",
     "interval_seconds",
@@ -158,6 +218,16 @@ PERSISTED_SYNC_KEYS = (
     "api_limit_total",
     "api_limit_hit_timestamps",
     "api_endpoints",
+    "broadcast_id",
+    "broadcast_message",
+    "broadcast_type",
+    "broadcast_until_ts",
+    "broadcast_created_ts",
+    "broadcast_created_by",
+    "dev_message_queue",
+    "dev_message_history",
+    "dev_feature_flags",
+    "dev_emergency_banner",
 )
 
 
@@ -285,6 +355,74 @@ for noisy_logger_name in ("werkzeug", "gunicorn.access"):
         noisy_logger.addFilter(PathSuppressFilter())
 
 
+def _get_process_memory_mb():
+    # Linux-friendly RSS read (Railway containers), with safe fallback.
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    parts = line.split()
+                    kb = int(parts[1]) if len(parts) > 1 else 0
+                    return round(kb / 1024.0, 2)
+    except Exception:
+        pass
+    try:
+        import resource  # Unix
+        rss_kb = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss or 0)
+        # On Linux ru_maxrss is KB.
+        return round(rss_kb / 1024.0, 2)
+    except Exception:
+        return 0.0
+
+
+def _percentile(values, p):
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return float(values[0])
+    ordered = sorted(values)
+    idx = int(round((len(ordered) - 1) * p))
+    idx = max(0, min(len(ordered) - 1, idx))
+    return float(ordered[idx])
+
+
+@app.before_request
+def _capture_request_start():
+    g._request_started_at = time.time()
+    g._request_in_bytes = int(request.content_length or 0)
+
+
+@app.after_request
+def _capture_request_end(response):
+    try:
+        now = int(time.time())
+        started = float(getattr(g, "_request_started_at", time.time()))
+        latency_ms = max(0.0, (time.time() - started) * 1000.0)
+        in_bytes = int(getattr(g, "_request_in_bytes", 0) or 0)
+        out_len = response.calculate_content_length()
+        out_bytes = int(out_len if out_len is not None else 0)
+        path = str(request.path or "/")
+        if len(path) > 120:
+            path = path[:120]
+        status = int(response.status_code or 0)
+        with metrics_lock:
+            runtime_metrics["requests_total"] = int(runtime_metrics.get("requests_total") or 0) + 1
+            runtime_metrics["bytes_in_total"] = int(runtime_metrics.get("bytes_in_total") or 0) + in_bytes
+            runtime_metrics["bytes_out_total"] = int(runtime_metrics.get("bytes_out_total") or 0) + out_bytes
+            path_counts = dict(runtime_metrics.get("path_counts") or {})
+            path_counts[path] = int(path_counts.get(path) or 0) + 1
+            runtime_metrics["path_counts"] = path_counts
+            status_counts = dict(runtime_metrics.get("status_counts") or {})
+            status_counts[str(status)] = int(status_counts.get(str(status)) or 0) + 1
+            runtime_metrics["status_counts"] = status_counts
+            runtime_metrics["latency_ms_recent"].append(float(latency_ms))
+            runtime_metrics["request_timestamps"].append(now)
+            runtime_metrics["io_recent"].append((now, in_bytes, out_bytes))
+    except Exception:
+        pass
+    return response
+
+
 def log_api_limit(service, endpoint, details=None, wait_seconds=None):
     record_api_limit_hit(service, endpoint, wait_seconds=wait_seconds)
     key = f"{service}:{endpoint}"
@@ -293,6 +431,197 @@ def log_api_limit(service, endpoint, details=None, wait_seconds=None):
     if now - api_limit_log_last.get(key, 0) < 60:
         return
     api_limit_log_last[key] = now
+
+
+def humanize_admin_action(action):
+    mapping = {
+        "bought_tag_set": "Bought tag enabled",
+        "bought_tag_removed": "Bought tag removed",
+        "evidence_add": "Evidence added",
+        "evidence_update": "Evidence updated",
+        "evidence_delete": "Evidence deleted",
+        "evidence_delete_all": "All evidence removed",
+        "manual_user_add": "Manual user add",
+        "manual_user_remove": "Manual user remove",
+    }
+    return mapping.get(str(action or "").strip().lower(), str(action or "Update").replace("_", " ").title())
+
+
+def build_profile_timeline(uid, user):
+    uid_text = str(uid)
+    now_ts = int(time.time())
+    events = []
+
+    first_seen_ts = int(user.get("first_seen_ts") or 0)
+    if first_seen_ts > 0:
+        events.append(
+            {
+                "ts": first_seen_ts,
+                "type": "discovery",
+                "title": "Added to Gamers Network",
+                "detail": "Profile first detected by the collector.",
+            }
+        )
+
+    if first_seen_ts > 0 and str(user.get("source", "")) == "Seed List":
+        events.append(
+            {
+                "ts": first_seen_ts + SEED_MATURATION_SECONDS,
+                "type": "status",
+                "title": "Promoted to Seed List",
+                "detail": "Moved from Newly Added after maturation window.",
+            }
+        )
+
+    for row in get_admin_logs(500):
+        if str(row.get("target_uid", "")).strip() != uid_text:
+            continue
+        events.append(
+            {
+                "ts": int(row.get("created_ts") or 0),
+                "type": "admin",
+                "title": humanize_admin_action(row.get("action")),
+                "detail": str(row.get("detail") or "").strip(),
+            }
+        )
+
+    for item in get_evidence_for_user(uid_text):
+        ts = int(item.get("updated_ts") or item.get("created_ts") or 0)
+        source = str(item.get("source_type") or "other").strip() or "other"
+        title = str(item.get("title") or "").strip()
+        detail = title if title else f"Evidence source: {source}"
+        if item.get("url"):
+            detail = f"{detail} ({item.get('url')})"
+        events.append(
+            {
+                "ts": ts,
+                "type": "evidence",
+                "title": "Evidence record",
+                "detail": detail,
+            }
+        )
+
+    if bool(user.get("bought_tag")) and not any("Bought tag" in e.get("title", "") for e in events):
+        # Backfill event for legacy records that predate admin logs.
+        fallback_ts = first_seen_ts if first_seen_ts > 0 else now_ts
+        events.append(
+            {
+                "ts": fallback_ts,
+                "type": "status",
+                "title": "Bought tag active",
+                "detail": "Current profile state includes a bought-check moderation label.",
+            }
+        )
+
+    events = [e for e in events if int(e.get("ts") or 0) > 0]
+    events.sort(key=lambda e: int(e.get("ts") or 0), reverse=True)
+    return events[:80]
+
+
+def build_public_changelog(limit=20):
+    lim = max(1, min(50, int(limit)))
+    items = []
+
+    for row in PUBLIC_CHANGELOG:
+        items.append(
+            {
+                "ts": int(row.get("created_ts") or 0),
+                "title": str(row.get("title") or "Update"),
+                "body": str(row.get("body") or ""),
+                "kind": str(row.get("kind") or "release"),
+                "source": "system",
+            }
+        )
+
+    for row in get_admin_logs(140):
+        action = str(row.get("action") or "").strip().lower()
+        if action not in {
+            "bought_tag_set",
+            "bought_tag_removed",
+            "evidence_add",
+            "evidence_update",
+            "evidence_delete",
+            "manual_user_add",
+            "manual_user_remove",
+        }:
+            continue
+        uid = str(row.get("target_uid") or "").strip()
+        suffix = f" (UID {uid})" if uid else ""
+        items.append(
+            {
+                "ts": int(row.get("created_ts") or 0),
+                "title": f"{humanize_admin_action(action)}{suffix}",
+                "body": str(row.get("detail") or "").strip(),
+                "kind": "moderation",
+                "source": "admin",
+            }
+        )
+
+    for ev in list(monitor_events)[:80]:
+        message = str(ev.get("message") or "").strip()
+        if not message:
+            continue
+        if not any(k in message.lower() for k in ["auto-sync", "collector", "database", "api limit", "manual user"]):
+            continue
+        items.append(
+            {
+                "ts": int(ev.get("ts") or 0),
+                "title": message[:120],
+                "body": "",
+                "kind": str(ev.get("level") or "info"),
+                "source": "monitor",
+            }
+        )
+
+    items = [i for i in items if int(i.get("ts") or 0) > 0]
+    items.sort(key=lambda i: int(i.get("ts") or 0), reverse=True)
+    return items[:lim]
+
+
+def probe_platform_endpoints_cached(ttl_seconds=45):
+    now = int(time.time())
+    cached_ts = int(platform_probe_cache.get("ts") or 0)
+    if (now - cached_ts) < int(ttl_seconds) and platform_probe_cache.get("items"):
+        return list(platform_probe_cache.get("items") or [])
+
+    checks = [
+        ("Users API", "https://users.roblox.com/v1/users/1"),
+        ("Friends API", "https://friends.roblox.com/v1/users/1/friends/count"),
+        ("Groups API", "https://groups.roblox.com/v1/groups/4199740"),
+        ("Thumbnails API", "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=1&size=150x150&format=Png&isCircular=true"),
+    ]
+    out = []
+    for name, url in checks:
+        t0 = time.time()
+        status_code = 0
+        latency_ms = 0
+        state = "down"
+        try:
+            r = requests.get(url, timeout=6)
+            status_code = int(r.status_code)
+            latency_ms = int((time.time() - t0) * 1000)
+            if 200 <= status_code < 300:
+                state = "ok"
+            elif status_code in {429, 500, 502, 503, 504}:
+                state = "degraded"
+            else:
+                state = "degraded"
+        except Exception:
+            latency_ms = int((time.time() - t0) * 1000)
+            state = "down"
+        out.append(
+            {
+                "name": name,
+                "status": state,
+                "http_status": status_code,
+                "latency_ms": latency_ms,
+                "url": url,
+            }
+        )
+
+    platform_probe_cache["ts"] = now
+    platform_probe_cache["items"] = out
+    return out
     details_payload = details or {}
     if wait_seconds is not None:
         try:
@@ -856,6 +1185,156 @@ def is_admin_authenticated():
     return bool(session.get("admin_auth"))
 
 
+def is_developer_authenticated():
+    return bool(session.get("developer_auth"))
+
+
+def _normalize_targets(targets):
+    if not isinstance(targets, list):
+        return ["all"]
+    cleaned = []
+    for t in targets:
+        key = str(t or "").strip().lower()
+        if key in allowed_dev_targets and key not in cleaned:
+            cleaned.append(key)
+    return cleaned or ["all"]
+
+
+def _normalize_priority(value):
+    key = str(value or "normal").strip().lower()
+    return key if key in priority_rank else "normal"
+
+
+def _prune_dev_queue(now_ts=None):
+    now_ts = int(now_ts or time.time())
+    queue = auto_sync_state.get("dev_message_queue") or []
+    queue = [q for q in queue if int(q.get("end_ts") or 0) > (now_ts - 60)]
+    if len(queue) > 80:
+        queue = queue[-80:]
+    auto_sync_state["dev_message_queue"] = queue
+
+
+def _append_dev_history(entry):
+    history = auto_sync_state.get("dev_message_history") or []
+    history.append(entry)
+    if len(history) > 180:
+        history = history[-180:]
+    auto_sync_state["dev_message_history"] = history
+
+
+def _message_targets_page(targets, page_key):
+    page_key = str(page_key or "all").lower()
+    tset = set(targets or ["all"])
+    return "all" in tset or page_key in tset
+
+
+def _ab_variant_for_client(message_item, client_id):
+    variants = message_item.get("variants") or {}
+    a = str(variants.get("a") or "").strip()
+    b = str(variants.get("b") or "").strip()
+    if not a or not b:
+        return None
+    try:
+        split_pct = int(variants.get("split_pct", 50))
+    except Exception:
+        split_pct = 50
+    split_pct = max(1, min(99, split_pct))
+    seed = f"{message_item.get('id')}::{client_id or ''}"
+    bucket = abs(hash(seed)) % 100
+    return "a" if bucket < split_pct else "b"
+
+
+def get_active_broadcast(page_key="all", client_id=""):
+    now_ts = int(time.time())
+    _prune_dev_queue(now_ts)
+
+    active = []
+    for item in auto_sync_state.get("dev_message_queue") or []:
+        start_ts = int(item.get("start_ts") or 0)
+        end_ts = int(item.get("end_ts") or 0)
+        if start_ts > now_ts or end_ts <= now_ts:
+            continue
+        if not _message_targets_page(item.get("targets") or ["all"], page_key):
+            continue
+        active.append(item)
+
+    if active:
+        active.sort(
+            key=lambda it: (
+                priority_rank.get(str(it.get("priority") or "normal"), 1),
+                int(it.get("created_ts") or 0),
+            ),
+            reverse=True,
+        )
+        top = active[0]
+        message_text = str(top.get("message") or "")
+        ab_variant = _ab_variant_for_client(top, client_id)
+        if ab_variant in {"a", "b"}:
+            message_text = str(((top.get("variants") or {}).get(ab_variant)) or message_text)
+        return {
+            "id": str(top.get("id") or ""),
+            "message": message_text,
+            "type": str(top.get("type") or "info"),
+            "priority": str(top.get("priority") or "normal"),
+            "created_ts": int(top.get("created_ts") or 0),
+            "start_ts": int(top.get("start_ts") or 0),
+            "until_ts": int(top.get("end_ts") or 0),
+            "targets": top.get("targets") or ["all"],
+            "variant": ab_variant or "",
+            "created_by": str(top.get("created_by") or "developer"),
+        }
+
+    # Legacy fallback
+    msg = str(auto_sync_state.get("broadcast_message") or "").strip()
+    until_ts = int(auto_sync_state.get("broadcast_until_ts") or 0)
+    if not msg or until_ts <= now_ts:
+        return None
+    return {
+        "id": int(auto_sync_state.get("broadcast_id") or 0),
+        "message": msg,
+        "type": str(auto_sync_state.get("broadcast_type") or "info"),
+        "priority": "normal",
+        "created_ts": int(auto_sync_state.get("broadcast_created_ts") or 0),
+        "start_ts": int(auto_sync_state.get("broadcast_created_ts") or 0),
+        "until_ts": until_ts,
+        "targets": ["all"],
+        "variant": "",
+        "created_by": str(auto_sync_state.get("broadcast_created_by") or "developer"),
+    }
+
+
+def get_active_emergency_banner():
+    now_ts = int(time.time())
+    cfg = auto_sync_state.get("dev_emergency_banner") or {}
+    enabled = bool(cfg.get("enabled"))
+    text = str(cfg.get("text") or "").strip()
+    until_ts = int(cfg.get("until_ts") or 0)
+    if not enabled or not text:
+        return None
+    if until_ts > 0 and until_ts <= now_ts:
+        return None
+    btype = str(cfg.get("type") or "warn").lower()
+    if btype not in {"info", "warn", "error", "success"}:
+        btype = "warn"
+    return {
+        "text": text,
+        "type": btype,
+        "until_ts": until_ts,
+        "updated_ts": int(cfg.get("updated_ts") or 0),
+    }
+
+
+def _presence_prune(now_ts=None):
+    now_ts = int(now_ts or time.time())
+    expiry = now_ts - 120
+    stale = []
+    for cid, rec in client_presence.items():
+        if int(rec.get("ts") or 0) < expiry:
+            stale.append(cid)
+    for cid in stale:
+        client_presence.pop(cid, None)
+
+
 # ---------------- Helper: fetch live user data ----------------
 def fetch_user_data(uid):
     now = time.time()
@@ -1068,6 +1547,302 @@ def collector_monitor():
     return render_template("collector_monitor.html", DEV_UID=DEV_UID)
 
 
+@app.route("/api-status")
+def api_status_page():
+    return render_template("api_status.html")
+
+
+@app.route("/changelog")
+def changelog_page():
+    items = build_public_changelog(limit=30)
+    return render_template("changelog.html", items=items)
+
+
+@app.route("/developer", methods=["GET", "POST"])
+def developer():
+    if not is_developer_authenticated():
+        error = None
+        if request.method == "POST":
+            password = request.form.get("password", "")
+            if password == DEVELOPER_PASSWORD:
+                session["developer_auth"] = True
+                return redirect(url_for("developer"))
+            error = "Invalid password"
+        return render_template("developer_login.html", error=error)
+
+    return render_template("developer_page.html")
+
+
+@app.route("/developer/logout", methods=["POST"])
+def developer_logout():
+    session.pop("developer_auth", None)
+    return redirect(url_for("developer"))
+
+
+@app.route("/api/developer/broadcast", methods=["GET", "POST", "DELETE"])
+def api_developer_broadcast():
+    if not is_developer_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    if request.method == "GET":
+        _prune_dev_queue()
+        queue = sorted(
+            auto_sync_state.get("dev_message_queue") or [],
+            key=lambda x: int(x.get("created_ts") or 0),
+            reverse=True,
+        )[:40]
+        return jsonify({"broadcast": get_active_broadcast("all", ""), "queue": queue})
+
+    if request.method == "DELETE":
+        payload = request.get_json(silent=True) or {}
+        target_id = str(payload.get("id") or "").strip()
+        if target_id:
+            queue = auto_sync_state.get("dev_message_queue") or []
+            before = len(queue)
+            queue = [q for q in queue if str(q.get("id")) != target_id]
+            auto_sync_state["dev_message_queue"] = queue
+            deleted = before - len(queue)
+            _append_dev_history(
+                {
+                    "ts": int(time.time()),
+                    "action": "queue_delete",
+                    "detail": f"id={target_id}, deleted={deleted}",
+                }
+            )
+        else:
+            auto_sync_state["dev_message_queue"] = []
+            auto_sync_state["broadcast_id"] = int(time.time() * 1000)
+            auto_sync_state["broadcast_message"] = ""
+            auto_sync_state["broadcast_type"] = "info"
+            auto_sync_state["broadcast_until_ts"] = 0
+            auto_sync_state["broadcast_created_ts"] = int(time.time())
+            auto_sync_state["broadcast_created_by"] = "developer"
+            _append_dev_history(
+                {"ts": int(time.time()), "action": "queue_clear", "detail": "Cleared all queued broadcasts"}
+            )
+        persist_auto_sync_state(force=True)
+        push_monitor_event("info", "Developer broadcast cleared")
+        return jsonify({"ok": True, "broadcast": get_active_broadcast("all", "")})
+
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get("message") or "").strip()
+    btype = str(payload.get("type") or "info").strip().lower()
+    if btype not in {"info", "success", "warn", "error"}:
+        btype = "info"
+    try:
+        duration_sec = int(payload.get("duration_sec", 12))
+    except Exception:
+        duration_sec = 12
+    duration_sec = max(4, min(60, duration_sec))
+    try:
+        start_in_sec = int(payload.get("start_in_sec", 0))
+    except Exception:
+        start_in_sec = 0
+    start_in_sec = max(0, min(24 * 60 * 60, start_in_sec))
+    targets = _normalize_targets(payload.get("targets") or ["all"])
+    priority = _normalize_priority(payload.get("priority") or "normal")
+
+    variant_a = str(payload.get("variant_a") or "").strip()
+    variant_b = str(payload.get("variant_b") or "").strip()
+    try:
+        split_pct = int(payload.get("split_pct", 50))
+    except Exception:
+        split_pct = 50
+    split_pct = max(1, min(99, split_pct))
+
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+    if len(message) > 220:
+        return jsonify({"error": "Message too long (max 220 chars)"}), 400
+
+    now_ts = int(time.time())
+    start_ts = now_ts + start_in_sec
+    end_ts = start_ts + duration_sec
+    message_id = str(uuid.uuid4())
+
+    queue_item = {
+        "id": message_id,
+        "message": message,
+        "type": btype,
+        "priority": priority,
+        "targets": targets,
+        "created_ts": now_ts,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "created_by": "developer",
+        "variants": {},
+    }
+    if variant_a and variant_b:
+        queue_item["variants"] = {"a": variant_a, "b": variant_b, "split_pct": split_pct}
+
+    queue = auto_sync_state.get("dev_message_queue") or []
+    queue.append(queue_item)
+    auto_sync_state["dev_message_queue"] = queue
+
+    # Keep legacy immediate broadcast fields for compatibility
+    auto_sync_state["broadcast_id"] = int(time.time() * 1000)
+    auto_sync_state["broadcast_message"] = message
+    auto_sync_state["broadcast_type"] = btype
+    auto_sync_state["broadcast_until_ts"] = end_ts
+    auto_sync_state["broadcast_created_ts"] = now_ts
+    auto_sync_state["broadcast_created_by"] = "developer"
+
+    _append_dev_history(
+        {
+            "ts": now_ts,
+            "action": "queue_add",
+            "detail": f"type={btype}, priority={priority}, targets={','.join(targets)}, start_in={start_in_sec}s, duration={duration_sec}s",
+            "message": message,
+            "id": message_id,
+        }
+    )
+    persist_auto_sync_state(force=True)
+    push_monitor_event(
+        "info",
+        "Developer broadcast sent",
+        {"type": btype, "duration_sec": duration_sec, "message": message, "targets": targets, "priority": priority},
+    )
+    return jsonify({"ok": True, "broadcast": get_active_broadcast("all", ""), "item": queue_item})
+
+
+@app.route("/api/developer/history", methods=["GET"])
+def api_developer_history():
+    if not is_developer_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    history = auto_sync_state.get("dev_message_history") or []
+    return jsonify({"items": list(reversed(history[-120:]))})
+
+
+@app.route("/api/developer/feature_flags", methods=["GET", "POST"])
+def api_developer_feature_flags():
+    if not is_developer_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if request.method == "GET":
+        return jsonify({"flags": auto_sync_state.get("dev_feature_flags") or {}})
+
+    payload = request.get_json(silent=True) or {}
+    flags = auto_sync_state.get("dev_feature_flags") or {}
+    for key in ("disable_animations", "hide_star_badges", "pause_auto_refresh"):
+        if key in payload:
+            flags[key] = bool(payload.get(key))
+    auto_sync_state["dev_feature_flags"] = flags
+    _append_dev_history(
+        {
+            "ts": int(time.time()),
+            "action": "flags_update",
+            "detail": ", ".join([f"{k}={bool(flags.get(k))}" for k in ("disable_animations", "hide_star_badges", "pause_auto_refresh")]),
+        }
+    )
+    persist_auto_sync_state(force=True)
+    return jsonify({"ok": True, "flags": flags})
+
+
+@app.route("/api/developer/emergency_banner", methods=["GET", "POST", "DELETE"])
+def api_developer_emergency_banner():
+    if not is_developer_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if request.method == "GET":
+        return jsonify({"banner": get_active_emergency_banner(), "raw": auto_sync_state.get("dev_emergency_banner") or {}})
+
+    if request.method == "DELETE":
+        auto_sync_state["dev_emergency_banner"] = {
+            "enabled": False,
+            "text": "",
+            "type": "warn",
+            "until_ts": 0,
+            "updated_ts": int(time.time()),
+        }
+        _append_dev_history({"ts": int(time.time()), "action": "banner_clear", "detail": "Emergency banner cleared"})
+        persist_auto_sync_state(force=True)
+        return jsonify({"ok": True, "banner": None})
+
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text") or "").strip()
+    btype = str(payload.get("type") or "warn").strip().lower()
+    if btype not in {"info", "warn", "error", "success"}:
+        btype = "warn"
+    try:
+        duration_sec = int(payload.get("duration_sec", 0))
+    except Exception:
+        duration_sec = 0
+    duration_sec = max(0, min(24 * 60 * 60, duration_sec))
+    until_ts = int(time.time()) + duration_sec if duration_sec > 0 else 0
+    auto_sync_state["dev_emergency_banner"] = {
+        "enabled": bool(text),
+        "text": text,
+        "type": btype,
+        "until_ts": until_ts,
+        "updated_ts": int(time.time()),
+    }
+    _append_dev_history(
+        {
+            "ts": int(time.time()),
+            "action": "banner_set" if text else "banner_clear",
+            "detail": f"type={btype}, duration={duration_sec}s",
+            "message": text,
+        }
+    )
+    persist_auto_sync_state(force=True)
+    return jsonify({"ok": True, "banner": get_active_emergency_banner()})
+
+
+@app.route("/api/client_presence", methods=["POST"])
+def api_client_presence():
+    payload = request.get_json(silent=True) or {}
+    client_id = str(payload.get("client_id") or "").strip()
+    if not client_id:
+        return jsonify({"error": "Missing client_id"}), 400
+    page = str(payload.get("page") or "unknown").strip().lower()
+    if page not in allowed_dev_targets:
+        page = "unknown"
+    now_ts = int(time.time())
+    record = {
+        "ts": now_ts,
+        "page": page,
+        "broadcast_id": str(payload.get("broadcast_id") or ""),
+        "variant": str(payload.get("variant") or ""),
+    }
+    with presence_lock:
+        client_presence[client_id] = record
+        _presence_prune(now_ts)
+    return jsonify({"ok": True, "ts": now_ts})
+
+
+@app.route("/api/developer/audience", methods=["GET"])
+def api_developer_audience():
+    if not is_developer_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    now_ts = int(time.time())
+    with presence_lock:
+        _presence_prune(now_ts)
+        items = list(client_presence.values())
+    by_page = {}
+    for rec in items:
+        by_page[rec.get("page") or "unknown"] = by_page.get(rec.get("page") or "unknown", 0) + 1
+    active = get_active_broadcast("all", "")
+    seen = 0
+    var_a = 0
+    var_b = 0
+    active_id = str((active or {}).get("id") or "")
+    if active_id:
+        for rec in items:
+            if str(rec.get("broadcast_id") or "") == active_id:
+                seen += 1
+                if rec.get("variant") == "a":
+                    var_a += 1
+                elif rec.get("variant") == "b":
+                    var_b += 1
+    return jsonify(
+        {
+            "active_viewers": len(items),
+            "by_page": by_page,
+            "active_broadcast_id": active_id,
+            "active_broadcast_seen": seen,
+            "ab_seen": {"a": var_a, "b": var_b},
+        }
+    )
+
+
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
     if not is_admin_authenticated():
@@ -1263,6 +2038,36 @@ def api_public_evidence(uid):
             "items": items,
         }
     )
+
+
+@app.route("/api/profile_timeline/<uid>")
+def api_profile_timeline(uid):
+    uid_text = str(uid).strip()
+    if not uid_text.isdigit():
+        return jsonify({"error": "Invalid uid"}), 400
+    user = get_user(uid_text)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    timeline = build_profile_timeline(uid_text, user)
+    return jsonify(
+        {
+            "uid": uid_text,
+            "username": user.get("username", ""),
+            "source": user.get("source", ""),
+            "bought_tag": bool(user.get("bought_tag")),
+            "timeline": timeline,
+        }
+    )
+
+
+@app.route("/api/changelog")
+def api_changelog():
+    try:
+        limit = int(request.args.get("limit", 14))
+    except Exception:
+        limit = 14
+    return jsonify({"items": build_public_changelog(limit=limit)})
 
 
 @app.route("/api/admin/manual_user_add", methods=["POST"])
@@ -1760,6 +2565,10 @@ def recent_bought():
 def live_status():
     global last_seen_db_mtime
     hydrate_auto_sync_state_from_db()
+    page_key = str(request.args.get("page", "all")).strip().lower()
+    if page_key not in allowed_dev_targets:
+        page_key = "all"
+    client_id = str(request.args.get("client_id", "")).strip()
     db = get_all_users()
     total = len(db)
     seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
@@ -1796,6 +2605,9 @@ def live_status():
             "new_users": new_total,
             "db_mtime": db_mtime,
             "db_updated_at": datetime.datetime.fromtimestamp(db_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "broadcast": get_active_broadcast(page_key=page_key, client_id=client_id),
+            "feature_flags": auto_sync_state.get("dev_feature_flags") or {},
+            "emergency_banner": get_active_emergency_banner(),
         }
     )
     # Prevent intermediary/browser caching so clients always see fresh cross-user updates.
@@ -1803,6 +2615,162 @@ def live_status():
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
     return resp
+
+
+@app.route("/api/platform_status")
+def api_platform_status():
+    hydrate_auto_sync_state_from_db()
+    now_ts = int(time.time())
+    db = get_all_users()
+    total_users = len(db)
+    seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
+    new_total = total_users - seed_total
+
+    day_24_cutoff = now_ts - (24 * 60 * 60)
+    day_7_cutoff = now_ts - (7 * 24 * 60 * 60)
+    added_24h = sum(1 for _, u in db.items() if int(u.get("first_seen_ts") or 0) >= day_24_cutoff)
+    added_7d = sum(1 for _, u in db.items() if int(u.get("first_seen_ts") or 0) >= day_7_cutoff)
+
+    bought_uids = [str(uid) for uid, u in db.items() if bool(u.get("bought_tag"))]
+    bought_total = len(bought_uids)
+    evidence_counts = get_evidence_counts(bought_uids) if bought_uids else {}
+    bought_with_evidence = sum(1 for uid in bought_uids if int(evidence_counts.get(str(uid), 0)) > 0)
+    bought_without_evidence = max(0, bought_total - bought_with_evidence)
+    evidence_coverage_pct = round((bought_with_evidence / bought_total) * 100.0, 1) if bought_total > 0 else 0.0
+
+    scanned_total = int(auto_sync_state.get("total_scanned_candidates") or 0)
+    found_total = int(auto_sync_state.get("total_new_verified_found") or 0)
+    discovery_efficiency_pct = round((found_total / scanned_total) * 100.0, 3) if scanned_total > 0 else 0.0
+
+    last_success_ts = int(auto_sync_state.get("last_success_ts") or 0)
+    seconds_since_success = max(0, now_ts - last_success_ts) if last_success_ts > 0 else None
+
+    endpoint_rows = []
+    cooldown_rows = []
+    for name, row in dict(auto_sync_state.get("api_endpoints") or {}).items():
+        last_ts = int(row.get("last_ts") or 0)
+        last_wait_seconds = int(row.get("last_wait_seconds") or 0)
+        remaining = max(0, (last_ts + last_wait_seconds) - now_ts) if last_ts > 0 and last_wait_seconds > 0 else 0
+        endpoint_rows.append(
+            {
+                "name": name,
+                "count": int(row.get("count") or 0),
+                "last_ts": last_ts,
+                "last_wait_seconds": last_wait_seconds,
+                "remaining_seconds": remaining,
+            }
+        )
+        if remaining > 0:
+            cooldown_rows.append(
+                {
+                    "name": name,
+                    "remaining_seconds": remaining,
+                    "last_wait_seconds": last_wait_seconds,
+                }
+            )
+    endpoint_rows.sort(key=lambda r: (r["count"], r["last_ts"]), reverse=True)
+    cooldown_rows.sort(key=lambda r: r["remaining_seconds"], reverse=True)
+
+    events = list(monitor_events)[:40]
+    events_sorted = sorted(events, key=lambda e: int(e.get("id") or 0))
+    recent_events = [
+        {
+            "id": int(e.get("id") or 0),
+            "ts": int(e.get("ts") or 0),
+            "level": str(e.get("level") or "info"),
+            "message": str(e.get("message") or ""),
+        }
+        for e in events_sorted[-20:]
+    ]
+
+    api_hits = [int(ts) for ts in list(auto_sync_state.get("api_limit_hit_timestamps") or []) if str(ts).isdigit()]
+    recent_cutoff = now_ts - 600
+    api_recent_10m = sum(1 for ts in api_hits if ts >= recent_cutoff)
+    probes = probe_platform_endpoints_cached(ttl_seconds=45)
+    probe_ok = sum(1 for p in probes if p.get("status") == "ok")
+    probe_degraded = sum(1 for p in probes if p.get("status") == "degraded")
+    probe_down = sum(1 for p in probes if p.get("status") == "down")
+
+    with metrics_lock:
+        started_ts = int(runtime_metrics.get("started_ts") or now_ts)
+        req_total = int(runtime_metrics.get("requests_total") or 0)
+        in_total = int(runtime_metrics.get("bytes_in_total") or 0)
+        out_total = int(runtime_metrics.get("bytes_out_total") or 0)
+        path_counts = dict(runtime_metrics.get("path_counts") or {})
+        status_counts = dict(runtime_metrics.get("status_counts") or {})
+        latencies = list(runtime_metrics.get("latency_ms_recent") or [])
+        req_ts = list(runtime_metrics.get("request_timestamps") or [])
+        io_recent = list(runtime_metrics.get("io_recent") or [])
+
+    one_minute_cutoff = now_ts - 60
+    requests_last_minute = sum(1 for ts in req_ts if int(ts) >= one_minute_cutoff)
+    in_last_minute = sum(int(inp or 0) for ts, inp, _ in io_recent if int(ts) >= one_minute_cutoff)
+    out_last_minute = sum(int(outp or 0) for ts, _, outp in io_recent if int(ts) >= one_minute_cutoff)
+    avg_latency = round((sum(latencies) / len(latencies)), 2) if latencies else 0.0
+    p95_latency = round(_percentile(latencies, 0.95), 2) if latencies else 0.0
+    uptime_seconds = max(0, now_ts - started_ts)
+    top_paths = sorted(path_counts.items(), key=lambda kv: kv[1], reverse=True)[:8]
+
+    return jsonify(
+        {
+            "server_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "running": bool(auto_sync_state.get("running")),
+            "current_stage": auto_sync_state.get("current_stage") or "Idle",
+            "stage_details": auto_sync_state.get("stage_details") or "",
+            "stage_eta_seconds": int(auto_sync_state.get("stage_eta_seconds") or 0),
+            "last_success_ts": last_success_ts,
+            "seconds_since_success": seconds_since_success,
+            "api_limit_total": int(auto_sync_state.get("api_limit_total") or 0),
+            "api_recent_10m": int(api_recent_10m),
+            "cooldowns_active": int(len(cooldown_rows)),
+            "cooldowns": cooldown_rows[:10],
+            "endpoints": endpoint_rows[:16],
+            "probes": probes,
+            "probe_summary": {
+                "ok": probe_ok,
+                "degraded": probe_degraded,
+                "down": probe_down,
+            },
+            "totals": {
+                "total_users": total_users,
+                "seed_users": seed_total,
+                "new_users": new_total,
+                "added_24h": int(added_24h),
+                "added_7d": int(added_7d),
+            },
+            "discovery": {
+                "scanned_total": scanned_total,
+                "found_total": found_total,
+                "efficiency_pct": discovery_efficiency_pct,
+            },
+            "moderation": {
+                "bought_total": bought_total,
+                "bought_with_evidence": int(bought_with_evidence),
+                "bought_without_evidence": int(bought_without_evidence),
+                "evidence_coverage_pct": evidence_coverage_pct,
+            },
+            "cache": {
+                "user_cache": len(user_cache),
+                "star_cache": len(star_cache),
+                "terminated_cache": len(terminated_cache),
+            },
+            "events": recent_events,
+            "runtime": {
+                "uptime_seconds": uptime_seconds,
+                "memory_rss_mb": _get_process_memory_mb(),
+                "requests_total": req_total,
+                "requests_last_minute": int(requests_last_minute),
+                "bytes_in_total": in_total,
+                "bytes_out_total": out_total,
+                "bytes_in_last_minute": int(in_last_minute),
+                "bytes_out_last_minute": int(out_last_minute),
+                "avg_latency_ms": avg_latency,
+                "p95_latency_ms": p95_latency,
+                "status_counts": status_counts,
+                "top_paths": [{"path": p, "count": int(c)} for p, c in top_paths],
+            },
+        }
+    )
 
 
 @app.route("/api/collector_monitor")
