@@ -869,6 +869,9 @@ def fetch_user_data(uid):
     stats = {"friends": 0, "followers": 0, "following": 0}
     avatar_url = ""
     star = False
+    basic_ok = False
+    stats_ok = False
+    avatar_ok = False
 
     # --- Basic user info ---
     try:
@@ -886,6 +889,7 @@ def fetch_user_data(uid):
                 "displayName": d.get("displayName"),
                 "joined": join_date or "Unknown",
             }
+            basic_ok = True
         elif r.status_code == 429:
             log_api_limit("users.roblox.com", f"/v1/users/{uid}")
     except:
@@ -902,6 +906,7 @@ def fetch_user_data(uid):
             r = requests.get(f"{BASE_FRIENDS}/{uid}/{endpoint}", timeout=5)
             if r.status_code == 200:
                 stats[key] = r.json().get("count", 0)
+                stats_ok = True
             elif r.status_code == 429:
                 log_api_limit("friends.roblox.com", f"/v1/users/{uid}/{endpoint}")
     except:
@@ -913,6 +918,7 @@ def fetch_user_data(uid):
         r = requests.get(url, timeout=5)
         if r.status_code == 200:
             avatar_url = r.json()["data"][0]["imageUrl"]
+            avatar_ok = bool(avatar_url)
         elif r.status_code == 429:
             log_api_limit("thumbnails.roblox.com", "/v1/users/avatar-headshot")
     except:
@@ -939,9 +945,15 @@ def fetch_user_data(uid):
         "avatar_url": avatar_url,
         "is_star_creator": star,
         "profile_url": profile_url,
+        "_partial": not (basic_ok and stats_ok and avatar_ok),
     }
 
-    user_cache[uid] = (data, now)
+    # Cache complete data normally; cache partial data briefly so transient API
+    # failures recover quickly instead of showing stale N/A/0 for long periods.
+    if data["_partial"]:
+        user_cache[uid] = (data, now - (CACHE_EXPIRY - 20))
+    else:
+        user_cache[uid] = (data, now)
     return data
 
 

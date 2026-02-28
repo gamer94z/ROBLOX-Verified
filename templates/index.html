@@ -42,13 +42,32 @@
     </svg>
 </a>
 
+<section class="index-top-stack">
+<section class="index-command-grid">
 <section class="live-status slim">
     <p><span class="badge badge-new">ONLINE</span> <strong id="liveMode">Connecting...</strong></p>
     <p id="liveUpdated">Last DB update: checking...</p>
     <p id="liveTotals">Total: -- | Seed: -- | Newly Added: --</p>
 </section>
+<section class="dashboard-strip dashboard-hero">
+    <div class="stat-pill">
+        <span>Current View</span>
+        <strong>
+            {% if search_type == 'seed' %}Seed (Matured)
+            {% elif search_type == 'database' %}All Users
+            {% elif search_type == 'individual' %}Search
+            {% else %}Newly Added
+            {% endif %}
+        </strong>
+    </div>
+    <div class="stat-pill">
+        <span>Result Count</span>
+        <strong>{{ total_label }}</strong>
+    </div>
+</section>
+</section>
 
-<section class="page-load-status panel" id="pageLoadStatus">
+<section class="page-load-status panel hidden" id="pageLoadStatus">
     <div class="load-top">
         <strong id="pageLoadText">Loading users...</strong>
         <span id="pageLoadProgress">0/0</span>
@@ -58,25 +77,34 @@
     </div>
 </section>
 
-<nav class="tabs">
-    <button class="tab-btn {% if search_type=='new' %}active{% endif %}" data-type="new">Newly Added</button>
-    <button class="tab-btn {% if search_type=='seed' %}active{% endif %}" data-type="seed">Seed List</button>
-    <button class="tab-btn {% if search_type=='database' %}active{% endif %}" data-type="database">Database</button>
-    <button class="tab-btn {% if search_type=='individual' %}active{% endif %}" data-type="individual">Search</button>
-</nav>
-
-<main>
-<section class="dashboard-strip">
-    <div class="stat-pill">
-        <span>Current View</span>
-        <strong>{{ search_type|capitalize }}</strong>
-    </div>
-    <div class="stat-pill">
-        <span>Result Count</span>
-        <strong>{{ total_label }}</strong>
-    </div>
+<section class="tabs-shell panel">
+    <nav class="tabs">
+        <button class="tab-btn {% if search_type=='new' %}active{% endif %}" data-type="new">Newly Added</button>
+        <button class="tab-btn {% if search_type=='seed' %}active{% endif %}" data-type="seed">Seed (Matured)</button>
+        <button class="tab-btn {% if search_type=='database' %}active{% endif %}" data-type="database">All Users</button>
+        <button class="tab-btn {% if search_type=='individual' %}active{% endif %}" data-type="individual">Search</button>
+    </nav>
+    <button id="quickHelpToggle" class="quick-help-toggle" type="button" aria-expanded="false" aria-controls="quickHelpPanel">?</button>
 </section>
 
+<section id="quickHelpPanel" class="quick-help-panel panel hidden">
+    <div class="quick-help-grid">
+        <div><strong>Discovery:</strong> Verified profiles are collected from public Roblox endpoints.</div>
+        <div><strong>Classification:</strong> Users are grouped as <em>Newly Added</em> or <em>Seed (Matured)</em>.</div>
+        <div><strong>Review:</strong> Moderator labels and evidence provide extra context on flagged profiles.</div>
+    </div>
+    <div class="quick-help-legend">
+        <span class="legend-title">Badge Legend:</span>
+        <span class="badge badge-new">Newly Added</span>
+        <span class="badge badge-seed">Seed List</span>
+        <span class="badge badge-manual">Manual Add</span>
+        <span class="badge badge-bought">Bought Check</span>
+        <span class="badge badge-star shiny">Star Creator</span>
+    </div>
+</section>
+</section>
+
+<main>
 <!-- Search section for individual -->
 <section class="search-section panel {% if search_type!='individual' %}hidden{% endif %}">
     <form method="get" id="searchForm">
@@ -210,8 +238,25 @@
 
 <!-- User cards -->
 <section class="results panel">
+    {% if results|length == 0 %}
+    <div class="empty-state">
+        {% if search_type == 'individual' %}
+            <h3>No user selected yet</h3>
+            <p>Use the Search tab to look up a username and load a profile card.</p>
+        {% elif search_type == 'database' %}
+            <h3>No users match these filters</h3>
+            <p>Adjust filters or use <strong>Clear</strong> to reset and see all profiles.</p>
+        {% elif search_type == 'seed' %}
+            <h3>No seed users available right now</h3>
+            <p>Profiles move into this tab after the maturation period in collection.</p>
+        {% else %}
+            <h3>No newly added users found</h3>
+            <p>Collector may still be scanning. Check the monitor for live progress.</p>
+        {% endif %}
+    </div>
+    {% endif %}
     {% for uid, info in results.items() %}
-    <div class="user-card" data-uid="{{ uid }}">
+    <div class="user-card" data-uid="{{ uid }}" data-bought="{{ 1 if info.bought_tag else 0 }}">
         <span class="banned-ribbon" style="display:none;">TERMINATED</span>
         <div class="avatar-shell is-loading">
             <div class="avatar-spinner"></div>
@@ -255,7 +300,7 @@
 </section>
 
 <!-- Pagination -->
-<div class="pagination panel">
+<div class="pagination panel pagination-modern">
 
     {% set q = namespace(filters="") %}
     {% if search_type == 'database' %}
@@ -274,6 +319,17 @@
     {% endif %}
     {% if search_type=='individual' and query %}
         {% set q.filters = q.filters + "&query=" + query %}
+    {% endif %}
+
+    <div class="pagination-meta">
+        Page <strong>{{ page }}</strong> of <strong>{{ total_pages if total_pages > 0 else 1 }}</strong>
+    </div>
+
+    <div class="pagination-links">
+    {% if page > 1 %}
+        <a class="page-nav" href="?page={{page-1}}&search_type={{search_type}}{{ q.filters }}">&laquo; Prev</a>
+    {% else %}
+        <span class="page-nav disabled">&laquo; Prev</span>
     {% endif %}
 
     <!-- First page always -->
@@ -298,13 +354,17 @@
         <a href="?page={{total_pages}}&search_type={{search_type}}{{ q.filters }}" class="{% if page==total_pages %}active{% endif %}">{{total_pages}}</a>
     {% endif %}
 
-    <!-- Jump To Page -->
-    <input type="number" id="jumpPage" min="1" max="{{total_pages}}" placeholder="Page">
-    <button type="button" id="jumpPageBtn">Go</button>
-
     {% if page < total_pages %}
-        <a href="?page={{page+1}}&search_type={{search_type}}{{ q.filters }}">Next &raquo;</a>
+        <a class="page-nav" href="?page={{page+1}}&search_type={{search_type}}{{ q.filters }}">Next &raquo;</a>
+    {% else %}
+        <span class="page-nav disabled">Next &raquo;</span>
     {% endif %}
+    </div>
+
+    <div class="pagination-jump">
+        <input type="number" id="jumpPage" min="1" max="{{ total_pages if total_pages > 0 else 1 }}" placeholder="Page">
+        <button type="button" id="jumpPageBtn">Go</button>
+    </div>
 
 </div>
 
@@ -316,9 +376,13 @@
     </div>
 </div>
 
+{% include "_policy_articles.html" %}
+
 <footer class="site-footer">
 <p>Gamers Network &copy; 2026</p>
 <p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
+<p class="site-legal">Roblox and its various names, marks, and logos are trademarks of Roblox Corporation.</p>
+<p class="site-legal">Gamers Network is an independent project and is not endorsed, sponsored, or affiliated with Roblox Corporation.</p>
 </footer>
 
 <div id="settings-modal" class="settings-modal hidden">
@@ -347,6 +411,8 @@
             <label><input type="checkbox" id="toggleReducedMotion"> Reduce motion</label>
             <label><input type="checkbox" id="toggleShowStars" checked> Show star badges</label>
             <label><input type="checkbox" id="toggleShowTerminated" checked> Show terminated tape</label>
+            <label><input type="checkbox" id="toggleMlgEffects"> Enable MLG effects (flashing)</label>
+            <small class="settings-hint">Warning: MLG effects include rapid flashes and moving imagery.</small>
         </div>
 
         <button id="resetSettingsBtn" class="settings-reset" type="button">Reset Settings</button>

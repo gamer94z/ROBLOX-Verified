@@ -163,11 +163,11 @@ body.monitor-page:not(.dark-mode) .pill {
     <h1>Collector Monitor</h1>
     <p>Live runtime details, recent updates, and event logs</p>
 </header>
-<a class="admin-corner-btn home-corner-btn" href="{{ url_for('home') }}" title="Home" aria-label="Open Home">
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3l9 8h-2v9h-5v-6H10v6H5v-9H3l9-8z" fill="currentColor"/></svg>
-</a>
-<a class="admin-corner-btn monitor-corner-btn" href="{{ url_for('collector_monitor') }}" title="Collector Monitor" aria-label="Open Collector Monitor">
+<a class="admin-corner-btn home-corner-btn" href="{{ url_for('collector_monitor') }}" title="Collector Monitor" aria-label="Open Collector Monitor">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 5h16v11H4V5zm2 2v7h12V7H6zm3 10h6v2H9v-2z" fill="currentColor"/></svg>
+</a>
+<a class="admin-corner-btn monitor-corner-btn" href="{{ url_for('index') }}" title="Index" aria-label="Open Index">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 4h8v7H3V4zm10 0h8v5h-8V4zM3 13h8v7H3v-7zm10-2h8v9h-8v-9z" fill="currentColor"/></svg>
 </a>
 <a class="admin-corner-btn settings-corner-btn" href="{{ url_for('admin') }}" title="Admin Panel" aria-label="Open Admin Panel">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2L4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5l-8-3zm0 2.2l6 2.3V11c0 4.2-2.7 8.2-6 9.2-3.3-1-6-5-6-9.2V6.5l6-2.3z" fill="currentColor"/></svg>
@@ -271,9 +271,13 @@ body.monitor-page:not(.dark-mode) .pill {
     </section>
 </main>
 
+{% include "_policy_articles.html" %}
+
 <footer class="site-footer">
     <p>Gamers Network &copy; 2026</p>
     <p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
+    <p class="site-legal">Roblox and its various names, marks, and logos are trademarks of Roblox Corporation.</p>
+    <p class="site-legal">Gamers Network is an independent project and is not endorsed, sponsored, or affiliated with Roblox Corporation.</p>
 </footer>
 
 <div id="settings-modal" class="settings-modal hidden">

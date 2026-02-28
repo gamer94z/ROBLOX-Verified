@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="tri" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fde047"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="24" fill="#0f172a"/>
+  <polygon points="128,34 222,210 34,210" fill="none" stroke="url(#tri)" stroke-width="12"/>
+  <ellipse cx="128" cy="136" rx="44" ry="24" fill="#e2e8f0"/>
+  <circle cx="128" cy="136" r="12" fill="#0f172a"/>
+  <circle cx="128" cy="136" r="5" fill="#f8fafc"/>
+  <text x="52" y="238" font-size="34" font-family="Arial Black,Arial,sans-serif" fill="#fde047">ILLUMINATI</text>
+</svg>

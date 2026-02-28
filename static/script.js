@@ -13,6 +13,334 @@ const evidenceOverlay = document.getElementById("evidenceOverlay");
 const evidenceCloseBtn = document.getElementById("evidenceCloseBtn");
 const evidenceTitle = document.getElementById("evidenceTitle");
 const evidenceBody = document.getElementById("evidenceBody");
+const quickHelpToggle = document.getElementById("quickHelpToggle");
+const quickHelpPanel = document.getElementById("quickHelpPanel");
+let pageLoadHideTimer = null;
+let breachOverlayEl = null;
+let breachAudioCtx = null;
+let breachAudioEl = null;
+let breachPlaying = false;
+let breachHideTimer = null;
+let pendingAutoReload = false;
+
+function isUiBusyForReload() {
+    const activeModal = document.querySelector(".modal.show");
+    const evidenceOpen = !!(evidenceOverlay && !evidenceOverlay.classList.contains("hidden"));
+    const breachOpen = !!(breachOverlayEl && !breachOverlayEl.classList.contains("hidden"));
+    const settingsOpen = !!(settingsModal && !settingsModal.classList.contains("hidden"));
+    return !!(activeModal || evidenceOpen || breachPlaying || breachOpen || settingsOpen);
+}
+
+function tryRunDeferredReload() {
+    if (!pendingAutoReload) return;
+    if (isUiBusyForReload()) return;
+    pendingAutoReload = false;
+    window.location.reload();
+}
+
+function ensureBreachOverlay() {
+    if (breachOverlayEl) {
+        breachOverlayEl.remove();
+        breachOverlayEl = null;
+    }
+    const el = document.createElement("div");
+    el.id = "breachModeOverlay";
+    el.className = "breach-mode-overlay hidden";
+    el.innerHTML = `
+        <div class="breach-bg"></div>
+        <div class="breach-marquee top">TOS BREACHER • BOUGHT CHECKMARK • POLICY FLAG • TOS BREACHER • BOUGHT CHECKMARK • POLICY FLAG •</div>
+        <div class="breach-marquee bottom">OOOH • MLG ALERT • OOOH • MLG ALERT • OOOH • MLG ALERT •</div>
+        <div class="breach-chaos" aria-hidden="true">
+            <img class="mlg-img doge i1" src="/static/mlg/doge.png" alt="Doge" onerror="this.style.display='none'">
+            <img class="mlg-img doge i2" src="/static/mlg/doge.png" alt="" onerror="this.style.display='none'">
+            <img class="mlg-img chip i3" src="/static/mlg/dorito.png" alt="Dorito chip" onerror="this.style.display='none'">
+            <img class="mlg-img chip i4" src="/static/mlg/dorito.png" alt="" onerror="this.style.display='none'">
+            <img class="mlg-img dew i5" src="/static/mlg/mtn_dew.png" alt="Mountain Dew" onerror="this.style.display='none'">
+            <img class="mlg-img dew i6" src="/static/mlg/mtn_dew.png" alt="" onerror="this.style.display='none'">
+            <img class="mlg-img glasses i7" src="/static/mlg/glasses.png" alt="Deal with it glasses" onerror="this.style.display='none'">
+            <img class="mlg-img glasses i8" src="/static/mlg/glasses.png" alt="" onerror="this.style.display='none'">
+            <img class="mlg-img wasted i9" src="/static/mlg/wasted.png" alt="Wasted text" onerror="this.style.display='none'">
+            <img class="mlg-img illuminati i10" src="/static/mlg/illuminati.png" alt="Illuminati" onerror="this.style.display='none'">
+            <img class="mlg-img illuminati i11" src="/static/mlg/illuminati.png" alt="" onerror="this.style.display='none'">
+            <img class="mlg-img chip i12" src="/static/mlg/dorito.png" alt="" onerror="this.style.display='none'">
+            <span class="sticker s1">MLG</span>
+            <span class="sticker s2">OOOH</span>
+            <span class="sticker s3">TOS BREACH</span>
+            <span class="sticker s4">NO WAY</span>
+            <span class="sticker s5">CHECKMARK BUYER</span>
+            <span class="sticker s6">POLICY FLAG</span>
+            <span class="sticker s7">SYSTEM ALERT</span>
+            <span class="sticker s8">REPORTED VIBES</span>
+            <span class="sticker s9">EXPOSED</span>
+            <span class="sticker s10">BROKE TOS</span>
+            <span class="sticker s11">OHHHH</span>
+            <span class="sticker s12">MOD WATCHING</span>
+            <span class="sticker s13">FAKE VERIFIED</span>
+            <span class="sticker s14">BIG YIKES</span>
+            <span class="sticker s15">POLICY HIT</span>
+            <span class="sticker s16">BOUGHT BADGE</span>
+        </div>
+        <div class="breach-lines">
+            <div class="breach-line main">YOU... HAVE CLICKED ON A FAKER.</div>
+            <div class="breach-line sub">TOS BREACHER DETECTED</div>
+            <div class="breach-line spin">BOUGHT CHECKMARK ALERT</div>
+            <div class="breach-timer" id="breachTimer">10</div>
+        </div>
+    `;
+    document.body.appendChild(el);
+    // Hard fallback styling so text/images always render even if CSS gets overridden.
+    Object.assign(el.style, {
+        position: "fixed",
+        inset: "0",
+        zIndex: "99999",
+        visibility: "visible",
+        opacity: "1",
+    });
+    const lines = el.querySelector(".breach-lines");
+    if (lines) Object.assign(lines.style, { position: "fixed", inset: "0", zIndex: "100001", pointerEvents: "none" });
+    const forceLine = (selector, top, size, color) => {
+        const n = el.querySelector(selector);
+        if (!n) return;
+        Object.assign(n.style, {
+            position: "fixed",
+            left: "50%",
+            top,
+            transform: "translateX(-50%)",
+            fontSize: size,
+            fontWeight: "900",
+            textTransform: "uppercase",
+            color,
+            zIndex: "100002",
+            display: "block",
+            opacity: "1",
+            visibility: "visible",
+            whiteSpace: "nowrap",
+        });
+    };
+    forceLine(".breach-line.main", "12vh", "clamp(1.9rem, 6.2vw, 4.8rem)", "#ffffff");
+    forceLine(".breach-line.sub", "31vh", "clamp(1.4rem, 4.4vw, 3rem)", "#fecaca");
+    forceLine(".breach-line.spin", "52vh", "clamp(1.2rem, 3.4vw, 2.2rem)", "#fde68a");
+    forceLine(".breach-timer", "72vh", "clamp(2.4rem, 7vw, 5rem)", "#f8fafc");
+    const marqueeTop = el.querySelector(".breach-marquee.top");
+    const marqueeBottom = el.querySelector(".breach-marquee.bottom");
+    if (marqueeTop) Object.assign(marqueeTop.style, {
+        position: "fixed", top: "2vh", left: "0", right: "0", zIndex: "100003",
+        display: "block", opacity: "1", visibility: "visible", textAlign: "center", color: "#fff"
+    });
+    if (marqueeBottom) Object.assign(marqueeBottom.style, {
+        position: "fixed", bottom: "2vh", left: "0", right: "0", zIndex: "100003",
+        display: "block", opacity: "1", visibility: "visible", textAlign: "center", color: "#fff"
+    });
+
+    const imgPos = {
+        "i1": { left: "1%", bottom: "2%", width: "20vw", maxWidth: "320px" },
+        "i2": { left: "70%", top: "56%", width: "14vw", maxWidth: "220px" },
+        "i3": { left: "8%", top: "44%", width: "12vw", maxWidth: "190px" },
+        "i4": { right: "2%", top: "54%", width: "10vw", maxWidth: "170px" },
+        "i5": { left: "2%", top: "9%", width: "14vw", maxWidth: "220px" },
+        "i6": { left: "44%", bottom: "10%", width: "12vw", maxWidth: "190px" },
+        "i7": { right: "10%", top: "7%", width: "24vw", maxWidth: "390px" },
+        "i8": { right: "36%", top: "24%", width: "16vw", maxWidth: "250px" },
+        "i9": { left: "30%", top: "2%", width: "30vw", maxWidth: "520px" },
+        "i10": { left: "3%", top: "65%", width: "12vw", maxWidth: "190px" },
+        "i11": { right: "43%", top: "66%", width: "10vw", maxWidth: "170px" },
+        "i12": { left: "83%", top: "41%", width: "10vw", maxWidth: "170px" },
+    };
+    el.querySelectorAll(".mlg-img").forEach((img) => {
+        const posClass = Array.from(img.classList).find(c => /^i\d+$/.test(c));
+        const p = posClass ? imgPos[posClass] : null;
+        Object.assign(img.style, {
+            position: "fixed",
+            display: "block",
+            visibility: "visible",
+            opacity: "1",
+            zIndex: "100000",
+            pointerEvents: "none",
+        });
+        if (p) Object.assign(img.style, p);
+    });
+    el.style.visibility = "hidden";
+    el.style.opacity = "0";
+    el.style.display = "none";
+    breachOverlayEl = el;
+    return el;
+}
+
+function playBreachAudio(durationMs = 10000) {
+    // Prefer user-supplied MP3 first.
+    try {
+        if (!breachAudioEl) {
+            breachAudioEl = new Audio("/static/audio/swaggityswagger.mp3");
+            breachAudioEl.preload = "auto";
+        }
+        breachAudioEl.currentTime = 0;
+        breachAudioEl.volume = 0.95;
+        breachAudioEl.play().catch(() => {});
+        setTimeout(() => {
+            try {
+                breachAudioEl.pause();
+                breachAudioEl.currentTime = 0;
+            } catch (_) {}
+        }, durationMs);
+        return;
+    } catch (_) {}
+
+    // Fallback synth if browser blocks/doesn't load media.
+    try {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextCtor) return;
+        breachAudioCtx = new AudioContextCtor();
+        const ctx = breachAudioCtx;
+        ctx.resume?.().catch(() => {});
+        const now = ctx.currentTime + 0.02;
+        const endAt = now + durationMs / 1000;
+
+        const note = (freq, start, len, type = "sawtooth", vol = 0.08) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            const lp = ctx.createBiquadFilter();
+            lp.type = "lowpass";
+            lp.frequency.setValueAtTime(type === "triangle" ? 900 : 1800, start);
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, start);
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(vol, start + 0.015);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + len);
+            osc.connect(lp).connect(gain).connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + len + 0.03);
+        };
+        const ooh = (start, base = 330, len = 0.48, vol = 0.14) => {
+            const osc1 = ctx.createOscillator();
+            const osc2 = ctx.createOscillator();
+            const gain = ctx.createGain();
+            const lp = ctx.createBiquadFilter();
+            lp.type = "lowpass";
+            lp.frequency.setValueAtTime(1100, start);
+            lp.frequency.exponentialRampToValueAtTime(700, start + len);
+
+            osc1.type = "triangle";
+            osc2.type = "sine";
+            osc1.frequency.setValueAtTime(base * 1.02, start);
+            osc2.frequency.setValueAtTime(base * 0.99, start);
+            osc1.frequency.exponentialRampToValueAtTime(base * 0.72, start + len);
+            osc2.frequency.exponentialRampToValueAtTime(base * 0.7, start + len);
+
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(vol, start + 0.045);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + len);
+
+            osc1.connect(lp);
+            osc2.connect(lp);
+            lp.connect(gain).connect(ctx.destination);
+            osc1.start(start);
+            osc2.start(start);
+            osc1.stop(start + len + 0.05);
+            osc2.stop(start + len + 0.05);
+        };
+
+        const kick = (start) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(160, start);
+            osc.frequency.exponentialRampToValueAtTime(45, start + 0.14);
+            gain.gain.setValueAtTime(0.22, start);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + 0.17);
+        };
+
+        const chordProg = [
+            [220, 277.18, 329.63],
+            [246.94, 311.13, 369.99],
+            [196, 246.94, 293.66],
+            [174.61, 220, 261.63],
+        ];
+        const leadSeq = [659.25, 783.99, 880, 987.77, 880, 783.99, 1046.5, 1174.66];
+
+        const barLen = 0.96;
+        let bar = 0;
+        while (now + bar * barLen < endAt) {
+            const barStart = now + bar * barLen;
+            const chord = chordProg[bar % chordProg.length];
+            chord.forEach((f) => note(f, barStart, barLen * 0.88, "triangle", 0.055));
+            note(chord[0] / 2, barStart, barLen * 0.82, "sine", 0.1);
+            kick(barStart);
+            kick(barStart + 0.48);
+
+            for (let i = 0; i < 8; i++) {
+                const st = barStart + i * 0.12;
+                if (st >= endAt) break;
+                note(leadSeq[(bar * 2 + i) % leadSeq.length], st, 0.1, "sawtooth", 0.05);
+            }
+            const chantStart = barStart + 0.18;
+            if (chantStart < endAt) ooh(chantStart, 370, 0.42, 0.13);
+            if (chantStart + 0.46 < endAt) ooh(chantStart + 0.46, 415, 0.4, 0.12);
+            bar += 1;
+        }
+
+        // Final stinger
+        if (endAt - now > 0.8) {
+            note(523.25, endAt - 0.42, 0.36, "sawtooth", 0.12);
+            note(659.25, endAt - 0.38, 0.34, "triangle", 0.11);
+            note(783.99, endAt - 0.34, 0.3, "triangle", 0.1);
+        }
+
+        setTimeout(() => {
+            ctx.close().catch(() => {});
+            breachAudioCtx = null;
+        }, durationMs + 300);
+    } catch (_) {
+        breachAudioCtx = null;
+    }
+}
+
+function runBreachMode(durationMs = 10000) {
+    if (breachPlaying) return Promise.resolve();
+    breachPlaying = true;
+    const overlay = ensureBreachOverlay();
+    const timerEl = overlay.querySelector("#breachTimer");
+    overlay.classList.remove("hidden");
+    overlay.style.display = "grid";
+    overlay.style.visibility = "visible";
+    overlay.style.opacity = "1";
+    document.body.classList.add("breach-rainbow-mode");
+    playBreachAudio(durationMs);
+
+    let remaining = Math.ceil(durationMs / 1000);
+    if (timerEl) timerEl.innerText = String(remaining);
+    const interval = setInterval(() => {
+        remaining -= 1;
+        if (timerEl) timerEl.innerText = String(Math.max(0, remaining));
+    }, 1000);
+
+    const stopBreachMode = () => {
+        clearInterval(interval);
+        if (overlay) {
+            overlay.classList.add("hidden");
+            overlay.style.display = "none";
+            overlay.style.visibility = "hidden";
+            overlay.style.opacity = "0";
+        }
+        document.body.classList.remove("breach-rainbow-mode");
+        try {
+            if (breachAudioEl) {
+                breachAudioEl.pause();
+                breachAudioEl.currentTime = 0;
+            }
+        } catch (_) {}
+        breachPlaying = false;
+    };
+
+    return new Promise(resolve => {
+        breachHideTimer = setTimeout(() => {
+            stopBreachMode();
+            resolve();
+        }, durationMs);
+    });
+}
 
 function installAvatarFallback(img) {
     if (!img) return;
@@ -23,6 +351,22 @@ function installAvatarFallback(img) {
     };
 }
 
+function safeStorageGet(key) {
+    try {
+        return localStorage.getItem(key);
+    } catch (_) {
+        return null;
+    }
+}
+
+function safeStorageSet(key, value) {
+    try {
+        localStorage.setItem(key, value);
+    } catch (_) {
+        // Ignore storage failures (private mode / blocked storage).
+    }
+}
+
 const SETTINGS_DEFAULTS = {
     theme: "light",
     refreshIntervalMs: 30000,
@@ -30,6 +374,7 @@ const SETTINGS_DEFAULTS = {
     reducedMotion: false,
     showStars: true,
     showTerminated: true,
+    mlgEffects: false,
 };
 
 function markAvatarLoaded(img) {
@@ -92,10 +437,26 @@ function updatePageLoadUI(stageText, loaded, total) {
     const safeTotal = total > 0 ? total : 1;
     const pct = Math.max(0, Math.min(100, Math.round((loaded / safeTotal) * 100)));
 
+    panel.classList.remove("hidden");
     panel.style.display = "block";
     textEl.innerText = stageText;
     progressEl.innerText = `${loaded}/${total}`;
     barEl.style.width = `${pct}%`;
+
+    if (pageLoadHideTimer) clearTimeout(pageLoadHideTimer);
+    const isReady = (total > 0 && loaded >= total) || /users ready/i.test(stageText);
+    const isUnavailable = /unavailable/i.test(stageText);
+    if (isReady) {
+        pageLoadHideTimer = setTimeout(() => {
+            panel.classList.add("hidden");
+            panel.style.display = "";
+        }, 900);
+    } else if (isUnavailable) {
+        pageLoadHideTimer = setTimeout(() => {
+            panel.classList.add("hidden");
+            panel.style.display = "";
+        }, 1600);
+    }
 }
 
 // ---------------- Persistent Dark Mode ----------------
@@ -106,18 +467,20 @@ const toggleCompactCards = document.getElementById("toggleCompactCards");
 const toggleReducedMotion = document.getElementById("toggleReducedMotion");
 const toggleShowStars = document.getElementById("toggleShowStars");
 const toggleShowTerminated = document.getElementById("toggleShowTerminated");
+const toggleMlgEffects = document.getElementById("toggleMlgEffects");
 const resetSettingsBtn = document.getElementById("resetSettingsBtn");
 const body = document.body;
 
 function loadSettings() {
-    const refreshStored = parseInt(localStorage.getItem("refresh_interval_ms"), 10);
+    const refreshStored = parseInt(safeStorageGet("refresh_interval_ms"), 10);
     return {
-        theme: localStorage.getItem("theme") || SETTINGS_DEFAULTS.theme,
+        theme: safeStorageGet("theme") || SETTINGS_DEFAULTS.theme,
         refreshIntervalMs: Number.isFinite(refreshStored) ? refreshStored : SETTINGS_DEFAULTS.refreshIntervalMs,
-        compactCards: localStorage.getItem("compact_cards") === "1",
-        reducedMotion: localStorage.getItem("reduced_motion") === "1",
-        showStars: localStorage.getItem("show_stars") !== "0",
-        showTerminated: localStorage.getItem("show_terminated") !== "0",
+        compactCards: safeStorageGet("compact_cards") === "1",
+        reducedMotion: safeStorageGet("reduced_motion") === "1",
+        showStars: safeStorageGet("show_stars") !== "0",
+        showTerminated: safeStorageGet("show_terminated") !== "0",
+        mlgEffects: safeStorageGet("mlg_effects") === "1",
     };
 }
 
@@ -133,15 +496,17 @@ function applySettings(settings) {
     if (toggleReducedMotion) toggleReducedMotion.checked = !!settings.reducedMotion;
     if (toggleShowStars) toggleShowStars.checked = !!settings.showStars;
     if (toggleShowTerminated) toggleShowTerminated.checked = !!settings.showTerminated;
+    if (toggleMlgEffects) toggleMlgEffects.checked = !!settings.mlgEffects;
 }
 
 function saveSettings(settings) {
-    localStorage.setItem("theme", settings.theme);
-    localStorage.setItem("refresh_interval_ms", String(settings.refreshIntervalMs));
-    localStorage.setItem("compact_cards", settings.compactCards ? "1" : "0");
-    localStorage.setItem("reduced_motion", settings.reducedMotion ? "1" : "0");
-    localStorage.setItem("show_stars", settings.showStars ? "1" : "0");
-    localStorage.setItem("show_terminated", settings.showTerminated ? "1" : "0");
+    safeStorageSet("theme", settings.theme);
+    safeStorageSet("refresh_interval_ms", String(settings.refreshIntervalMs));
+    safeStorageSet("compact_cards", settings.compactCards ? "1" : "0");
+    safeStorageSet("reduced_motion", settings.reducedMotion ? "1" : "0");
+    safeStorageSet("show_stars", settings.showStars ? "1" : "0");
+    safeStorageSet("show_terminated", settings.showTerminated ? "1" : "0");
+    safeStorageSet("mlg_effects", settings.mlgEffects ? "1" : "0");
 }
 
 let appSettings = loadSettings();
@@ -184,6 +549,11 @@ toggleShowTerminated?.addEventListener("change", () => {
     applySettings(appSettings);
     saveSettings(appSettings);
 });
+toggleMlgEffects?.addEventListener("change", () => {
+    appSettings.mlgEffects = !!toggleMlgEffects.checked;
+    applySettings(appSettings);
+    saveSettings(appSettings);
+});
 resetSettingsBtn?.addEventListener("click", () => {
     appSettings = { ...SETTINGS_DEFAULTS };
     applySettings(appSettings);
@@ -195,17 +565,70 @@ resetSettingsBtn?.addEventListener("click", () => {
 const settingsModal = document.getElementById("settings-modal");
 const closeSettings = document.getElementById("closeSettings");
 const cornerSettingsBtn = document.getElementById("cornerSettingsBtn");
+let settingsOpenTimer = null;
+let settingsCloseTimer = null;
+
+function openSettingsModal() {
+    if (!settingsModal) return;
+    if (settingsCloseTimer) {
+        clearTimeout(settingsCloseTimer);
+        settingsCloseTimer = null;
+    }
+    settingsModal.classList.remove("hidden");
+    if (settingsOpenTimer) clearTimeout(settingsOpenTimer);
+    settingsOpenTimer = setTimeout(() => {
+        settingsModal.classList.add("is-open");
+    }, 10);
+}
+
+function closeSettingsModal() {
+    if (!settingsModal) return;
+    if (settingsOpenTimer) {
+        clearTimeout(settingsOpenTimer);
+        settingsOpenTimer = null;
+    }
+    settingsModal.classList.remove("is-open");
+    if (settingsCloseTimer) clearTimeout(settingsCloseTimer);
+    settingsCloseTimer = setTimeout(() => {
+        settingsModal.classList.add("hidden");
+    }, 220);
+}
+
+function toggleSettingsModal() {
+    if (!settingsModal) return;
+    if (settingsModal.classList.contains("hidden")) {
+        openSettingsModal();
+    } else {
+        closeSettingsModal();
+    }
+}
 
 searchSelect.forEach(btn => {
     if (btn.dataset.type === "settings") {
         btn.addEventListener("click", () => {
-            settingsModal.classList.toggle("hidden");
+            toggleSettingsModal();
         });
     }
 });
 
-closeSettings?.addEventListener("click", () => settingsModal.classList.add("hidden"));
-cornerSettingsBtn?.addEventListener("click", () => settingsModal?.classList.toggle("hidden"));
+closeSettings?.addEventListener("click", closeSettingsModal);
+cornerSettingsBtn?.addEventListener("click", toggleSettingsModal);
+
+if (quickHelpPanel) {
+    // Convert initial hidden state into animated collapsed state.
+    if (quickHelpPanel.classList.contains("hidden")) {
+        quickHelpPanel.classList.remove("hidden");
+        quickHelpPanel.classList.add("quick-help-collapsed");
+    }
+    if (quickHelpToggle) quickHelpToggle.setAttribute("aria-expanded", "false");
+}
+
+quickHelpToggle?.addEventListener("click", () => {
+    if (!quickHelpPanel) return;
+    quickHelpPanel.classList.toggle("quick-help-collapsed");
+    const expanded = !quickHelpPanel.classList.contains("quick-help-collapsed");
+    quickHelpToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+});
 
 // ---------------- Draggable Settings ----------------
 if (settingsModal) {
@@ -343,6 +766,7 @@ function batchFetchAvatars() {
                 if (card && payload.is_star_creator) showStarBadge(uid);
 
                 if (card && payload.is_bought) {
+                    card.dataset.bought = "1";
                     let boughtBadge = card.querySelector(".badge-bought");
                     if (!boughtBadge) {
                         boughtBadge = document.createElement("span");
@@ -374,14 +798,25 @@ function batchFetchAvatars() {
 
                 await new Promise(done => {
                     installAvatarFallback(img);
-                    img.addEventListener("load", async () => {
+                    let settled = false;
+                    const finish = async () => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timeoutId);
                         await finalizeOne(img);
                         done();
+                    };
+                    img.addEventListener("load", async () => {
+                        await finish();
                     }, { once: true });
                     img.addEventListener("error", async () => {
-                        await finalizeOne(img);
-                        done();
+                        img.src = AVATAR_PLACEHOLDER;
+                        await finish();
                     }, { once: true });
+                    const timeoutId = setTimeout(async () => {
+                        img.src = AVATAR_PLACEHOLDER;
+                        await finish();
+                    }, 4500);
                     img.src = payload.avatar_url || AVATAR_PLACEHOLDER;
                 });
             }
@@ -390,25 +825,44 @@ function batchFetchAvatars() {
         })
         .catch(() => {
             document.querySelectorAll(".avatar-shell").forEach(shell => shell.classList.add("is-ready"));
-            document.querySelectorAll(".avatar-small").forEach(img => img.classList.remove("loading-avatar"));
+            document.querySelectorAll(".avatar-small").forEach(img => {
+                installAvatarFallback(img);
+                if (!img.getAttribute("src")) {
+                    img.src = AVATAR_PLACEHOLDER;
+                }
+                img.classList.remove("loading-avatar");
+            });
             updatePageLoadUI("Loading unavailable", 0, total);
         });
 }
 
 // ---------------- Fetch full user data only on click ----------------
 function fetchUserModal(uid, callback) {
-    if (userDataCache[uid]?.fullData) return callback(userDataCache[uid].fullData);
+    if (userDataCache[uid]?.fullData && !userDataCache[uid]?.fullData?._partial) {
+        return callback(userDataCache[uid].fullData);
+    }
 
     if (currentControllers[uid]) currentControllers[uid].abort();
     const controller = new AbortController();
     currentControllers[uid] = controller;
 
-    fetch(`/user/${uid}`, { signal: controller.signal })
-        .then(r => r.json())
+    const requestUser = (withBust) => fetch(`/user/${uid}${withBust ? `?t=${Date.now()}` : ""}`, { signal: controller.signal })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)));
+
+    requestUser(false)
         .then(data => {
-            userDataCache[uid].fullData = data;
-            callback(data);
-        }).catch(err => {
+            if (!data?._partial) {
+                if (!userDataCache[uid]) userDataCache[uid] = {};
+                userDataCache[uid].fullData = data;
+                return callback(data);
+            }
+            return requestUser(true).then(data2 => {
+                if (!userDataCache[uid]) userDataCache[uid] = {};
+                userDataCache[uid].fullData = data2;
+                callback(data2);
+            });
+        })
+        .catch(err => {
             if (err.name === "AbortError") return;
             callback(null);
         });
@@ -428,7 +882,27 @@ function setupCardModal(card, uid) {
     const profileBtn = modal.querySelector(".profile-btn");
     const evidenceBtn = modal.querySelector(".evidence-btn");
 
-    card.addEventListener("click", () => {
+    const showMlgDisabledNotice = () => {
+        let notice = modal.querySelector(".mlg-warning-under-modal");
+        if (!notice) {
+            notice = document.createElement("div");
+            notice.className = "mlg-warning-under-modal";
+            notice.innerHTML = `
+                <strong>MLG effects are OFF.</strong>
+                This Bought Check profile has optional flashing effects. Open <strong>Settings</strong> to enable or keep disabled.
+            `;
+            if (modalContent?.parentNode === modal) {
+                modal.insertBefore(notice, modalContent.nextSibling);
+            } else {
+                modal.appendChild(notice);
+            }
+        }
+        notice.classList.add("show");
+        if (showMlgDisabledNotice._timer) clearTimeout(showMlgDisabledNotice._timer);
+        showMlgDisabledNotice._timer = setTimeout(() => notice.classList.remove("show"), 5200);
+    };
+
+    const openCardModalFlow = () => {
         modal.classList.add("show");
         modalContent.classList.add("is-loading");
         header.innerHTML = ""; pSource.innerHTML = ""; extra.innerHTML = "";
@@ -468,12 +942,13 @@ function setupCardModal(card, uid) {
             avatarLarge.style.display = "block";
 
             extra.innerHTML = `
+                ${data._partial ? '<div class="mlg-modal-note">Live profile stats are still syncing. Showing best available data.</div>' : ""}
                 <div class="profile-grid">
                     <div><span class="k">Display</span><span class="v">${data.live?.displayName || "N/A"}</span></div>
                     <div><span class="k">Joined</span><span class="v">${data.live?.joined || "N/A"}</span></div>
-                    <div><span class="k">Friends</span><span class="v">${data.stats.friends}</span></div>
-                    <div><span class="k">Followers</span><span class="v">${data.stats.followers}</span></div>
-                    <div><span class="k">Following</span><span class="v">${data.stats.following}</span></div>
+                    <div><span class="k">Friends</span><span class="v">${data._partial ? "N/A" : data.stats.friends}</span></div>
+                    <div><span class="k">Followers</span><span class="v">${data._partial ? "N/A" : data.stats.followers}</span></div>
+                    <div><span class="k">Following</span><span class="v">${data._partial ? "N/A" : data.stats.following}</span></div>
                     <div><span class="k">User ID</span><span class="v">${uid}</span></div>
                 </div>
             `;
@@ -491,20 +966,66 @@ function setupCardModal(card, uid) {
             }
             requestAnimationFrame(() => modalContent.classList.remove("is-loading"));
         });
+    };
+
+    card.addEventListener("click", async () => {
+        const knownBought = !!userDataCache[uid]?.is_bought;
+        const datasetBought = card.dataset.bought === "1";
+        const domBought = !!card.querySelector(".badge-bought");
+        if (knownBought || datasetBought || domBought) {
+            if (appSettings.mlgEffects) {
+                await runBreachMode(6000);
+                // Hard cleanup in case any overlapping click/timer leaves residue.
+                document.body.classList.remove("breach-rainbow-mode");
+                const ov = document.getElementById("breachModeOverlay");
+                if (ov) {
+                    ov.classList.add("hidden");
+                    ov.style.display = "none";
+                    ov.style.visibility = "hidden";
+                    ov.style.opacity = "0";
+                }
+                if (breachHideTimer) {
+                    clearTimeout(breachHideTimer);
+                    breachHideTimer = null;
+                }
+                try {
+                    if (breachAudioEl) {
+                        breachAudioEl.pause();
+                        breachAudioEl.currentTime = 0;
+                    }
+                } catch (_) {}
+                breachPlaying = false;
+            } else {
+                openCardModalFlow();
+                setTimeout(showMlgDisabledNotice, 120);
+                return;
+            }
+        }
+        openCardModalFlow();
     });
 
     closeBtn.addEventListener("click", () => {
         modal.classList.remove("show");
         modalContent.classList.remove("is-loading");
+        const notice = modal.querySelector(".mlg-warning-under-modal");
+        if (notice) notice.classList.remove("show");
+        setTimeout(tryRunDeferredReload, 60);
     });
 }
 
 evidenceCloseBtn?.addEventListener("click", closeEvidenceOverlay);
 evidenceOverlay?.addEventListener("click", (e) => {
-    if (e.target === evidenceOverlay) closeEvidenceOverlay();
+    if (e.target === evidenceOverlay) {
+        closeEvidenceOverlay();
+        setTimeout(tryRunDeferredReload, 60);
+    }
 });
 document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeEvidenceOverlay();
+    if (e.key === "Escape") {
+        closeEvidenceOverlay();
+        document.querySelectorAll(".modal.show").forEach(m => m.classList.remove("show"));
+        setTimeout(tryRunDeferredReload, 60);
+    }
 });
 
 // ---------------- Setup all cards ----------------
@@ -611,7 +1132,10 @@ document.addEventListener("DOMContentLoaded", () => {
             loadingText.style.display = "none";
         });
 
-    closeBtn.addEventListener("click", () => modal.classList.remove("show"));
+    closeBtn.addEventListener("click", () => {
+        modal.classList.remove("show");
+        setTimeout(tryRunDeferredReload, 60);
+    });
 });
 
 // ---------------- Initial batch avatar fetch ----------------
@@ -641,7 +1165,11 @@ async function pollLiveStatus() {
         }
 
         if (lastDbMtime !== null && status.db_mtime !== lastDbMtime) {
-            window.location.reload();
+            if (isUiBusyForReload()) {
+                pendingAutoReload = true;
+            } else {
+                window.location.reload();
+            }
             return;
         }
         lastDbMtime = status.db_mtime;
@@ -653,7 +1181,10 @@ async function pollLiveStatus() {
 function startLiveStatusPolling() {
     if (liveStatusPollHandle) clearInterval(liveStatusPollHandle);
     pollLiveStatus();
-    liveStatusPollHandle = setInterval(pollLiveStatus, appSettings.refreshIntervalMs);
+    liveStatusPollHandle = setInterval(() => {
+        pollLiveStatus();
+        tryRunDeferredReload();
+    }, appSettings.refreshIntervalMs);
 }
 
 startLiveStatusPolling();
