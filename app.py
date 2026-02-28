@@ -866,7 +866,7 @@ def fetch_user_data(uid):
             return data
 
     live = None
-    stats = {"friends": 0, "followers": 0, "following": 0}
+    stats = {"friends": None, "followers": None, "following": None}
     avatar_url = ""
     star = False
     basic_ok = False
@@ -902,13 +902,20 @@ def fetch_user_data(uid):
             "followers": "followers/count",
             "following": "followings/count",
         }
+        stats_success_count = 0
         for key, endpoint in endpoints.items():
             r = requests.get(f"{BASE_FRIENDS}/{uid}/{endpoint}", timeout=5)
             if r.status_code == 200:
-                stats[key] = r.json().get("count", 0)
-                stats_ok = True
+                stats[key] = r.json().get("count")
+                stats_success_count += 1
             elif r.status_code == 429:
                 log_api_limit("friends.roblox.com", f"/v1/users/{uid}/{endpoint}")
+        # Only mark stats as complete when all three endpoints succeed.
+        stats_ok = stats_success_count == len(endpoints)
+        if stats_ok:
+            for k in ("friends", "followers", "following"):
+                if stats[k] is None:
+                    stats[k] = 0
     except:
         pass
 
