@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gamers Network | Developer</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+.dev-main {
+  max-width: 1260px;
+  margin: 1.1rem auto 2rem;
+  padding: 0 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+.dev-hero {
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background: linear-gradient(150deg, rgba(15,23,42,0.96), rgba(2,6,23,0.96));
+  padding: 0.9rem 1rem;
+}
+.dev-hero h2 { margin: 0 0 0.25rem; color: #93c5fd; }
+.dev-hero p { margin: 0; color: #cbd5e1; }
+.dev-hero-meta {
+  margin-top: 0.6rem;
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.dev-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.48rem;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: rgba(2, 6, 23, 0.5);
+  color: #dbeafe;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+.dev-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 0.8rem;
+}
+.dev-stack {
+  display: grid;
+  gap: 0.8rem;
+}
+.dev-panel {
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background: linear-gradient(150deg, rgba(15,23,42,0.96), rgba(2,6,23,0.96));
+  padding: 0.9rem;
+}
+.dev-panel h3 {
+  margin: 0 0 0.65rem;
+  color: #7dd3fc;
+  font-size: 1rem;
+}
+.dev-panel p {
+  margin: 0 0 0.6rem;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+.dev-form {
+  display: grid;
+  gap: 0.65rem;
+}
+.dev-field {
+  display: grid;
+  gap: 0.32rem;
+}
+.dev-field > span {
+  font-weight: 700;
+  color: #93c5fd;
+  font-size: 0.84rem;
+}
+.dev-input,
+.dev-select,
+.dev-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: #e2e8f0;
+}
+.dev-textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+.dev-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+.dev-row3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+.dev-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.dev-btn {
+  min-height: 38px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: linear-gradient(145deg, #10203b, #0b1427);
+  color: #dbeafe;
+  font-weight: 700;
+  font-size: 0.84rem;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.35);
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.dev-btn:hover {
+  transform: translateY(-1px);
+  border-color: #38bdf8;
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.42);
+}
+.dev-btn-primary {
+  border-color: #2563eb;
+  background: linear-gradient(145deg, #1d4ed8, #0369a1);
+  color: #eff6ff;
+}
+.dev-btn-secondary {
+  border-color: #475569;
+  background: linear-gradient(145deg, #1e293b, #0f172a);
+}
+.dev-btn-danger {
+  border-color: #be123c;
+  background: linear-gradient(145deg, #4c1020, #3f0b13);
+  color: #fecdd3;
+}
+.dev-btn-good {
+  border-color: #16a34a;
+  background: linear-gradient(145deg, #14532d, #052e16);
+  color: #dcfce7;
+}
+.dev-mini {
+  font-size: 0.75rem;
+  min-height: 30px;
+  padding: 0.36rem 0.52rem;
+}
+.dev-current {
+  margin-top: 0.45rem;
+  padding: 0.58rem 0.66rem;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: #cbd5e1;
+  font-size: 0.88rem;
+}
+.dev-presets {
+  display: grid;
+  gap: 0.42rem;
+}
+.dev-preset {
+  text-align: left;
+  width: 100%;
+}
+.dev-table-wrap {
+  border: 1px solid #334155;
+  border-radius: 12px;
+  overflow: auto;
+  max-height: 280px;
+  background: #0b1220;
+}
+.dev-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.dev-table th,
+.dev-table td {
+  padding: 0.42rem 0.5rem;
+  border-bottom: 1px solid #1f2937;
+  text-align: left;
+  color: #cbd5e1;
+  vertical-align: top;
+}
+.dev-table th {
+  position: sticky;
+  top: 0;
+  background: #0a1020;
+  color: #93c5fd;
+  z-index: 1;
+}
+.dev-table td small {
+  color: #94a3b8;
+  display: block;
+}
+.dev-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.dev-kpi {
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #0b1220;
+  padding: 0.58rem 0.62rem;
+}
+.dev-kpi-label {
+  color: #93c5fd;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.dev-kpi-value {
+  margin-top: 0.16rem;
+  color: #f1f5f9;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.dev-kpi-sub {
+  margin-top: 0.1rem;
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+.dev-log-list {
+  display: grid;
+  gap: 0.44rem;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 0.1rem;
+}
+.dev-log-item {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1220;
+  padding: 0.5rem 0.58rem;
+}
+.dev-log-meta {
+  color: #93c5fd;
+  font-size: 0.72rem;
+  margin-bottom: 0.2rem;
+}
+.dev-log-body {
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+.dev-tools {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.dev-tool {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1220;
+  padding: 0.45rem 0.5rem;
+  min-height: 64px;
+}
+.dev-tool h4 {
+  margin: 0 0 0.18rem;
+  color: #dbeafe;
+  font-size: 0.78rem;
+}
+.dev-tool p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.69rem;
+  line-height: 1.32;
+}
+.dev-foot-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+@media (max-width: 1120px) {
+  .dev-grid { grid-template-columns: 1fr; }
+  .dev-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dev-tools { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .dev-row,
+  .dev-row3 {
+    grid-template-columns: 1fr;
+  }
+  .dev-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+</head>
+<body class="main-app dark-mode">
+<header>
+  <h1>Developer Operations</h1>
+  <p>Full control, queueing, telemetry, and live user messaging</p>
+</header>
+
+<a class="admin-corner-btn home-corner-btn" href="{{ url_for('index') }}" title="Index" aria-label="Open Index">
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+    <path d="M3 4h8v7H3V4zm10 0h8v5h-8V4zM3 13h8v7H3v-7zm10-2h8v9h-8v-9z" fill="currentColor"/>
+  </svg>
+</a>
+
+<main class="dev-main">
+  <section class="dev-hero">
+    <h2>Developer Command Hub</h2>
+    <p>This page now includes live broadcast control, queue manager, audience tracking, feature flags, emergency banner, and platform health.</p>
+    <div class="dev-hero-meta">
+      <span class="dev-pill">Global Live Control</span>
+      <span class="dev-pill">Queue + Priority</span>
+      <span class="dev-pill">A/B Variants</span>
+      <span class="dev-pill">50 Dev Tools Matrix</span>
+    </div>
+  </section>
+
+  <section class="dev-grid">
+    <section class="dev-stack">
+      <section class="dev-panel">
+        <h3>1) Broadcast Composer</h3>
+        <div class="dev-form">
+          <label class="dev-field">
+            <span>Message</span>
+            <textarea id="devMsg" class="dev-textarea" maxlength="220" placeholder="Type a live operational message..."></textarea>
+          </label>
+
+          <div class="dev-row3">
+            <label class="dev-field">
+              <span>Type</span>
+              <select id="devType" class="dev-select">
+                <option value="info">Info</option>
+                <option value="success">Success</option>
+                <option value="warn">Warning</option>
+                <option value="error">Error</option>
+              </select>
+            </label>
+            <label class="dev-field">
+              <span>Duration (sec)</span>
+              <input id="devDuration" class="dev-input" type="number" min="4" max="60" value="12">
+            </label>
+            <label class="dev-field">
+              <span>Starts In (sec)</span>
+              <input id="devStartIn" class="dev-input" type="number" min="0" max="3600" value="0">
+            </label>
+          </div>
+
+          <div class="dev-row3">
+            <label class="dev-field">
+              <span>Target</span>
+              <select id="devTarget" class="dev-select">
+                <option value="all">All pages</option>
+                <option value="home">Home</option>
+                <option value="index">Index</option>
+                <option value="database">Database</option>
+                <option value="monitor">Monitor</option>
+                <option value="api_status">API Status</option>
+                <option value="changelog">Changelog</option>
+              </select>
+            </label>
+            <label class="dev-field">
+              <span>Priority</span>
+              <select id="devPriority" class="dev-select">
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+            <label class="dev-field">
+              <span>A/B Split % (A)</span>
+              <input id="devSplitPct" class="dev-input" type="number" min="1" max="99" value="50">
+            </label>
+          </div>
+
+          <div class="dev-row">
+            <label class="dev-field">
+              <span>Variant A (optional)</span>
+              <input id="devVariantA" class="dev-input" type="text" maxlength="220" placeholder="Variant A copy">
+            </label>
+            <label class="dev-field">
+              <span>Variant B (optional)</span>
+              <input id="devVariantB" class="dev-input" type="text" maxlength="220" placeholder="Variant B copy">
+            </label>
+          </div>
+
+          <div class="dev-actions">
+            <button class="dev-btn dev-btn-primary" id="devSendBtn" type="button">Send Broadcast</button>
+            <button class="dev-btn dev-btn-danger" id="devClearBtn" type="button">Clear Active + Queue</button>
+          </div>
+        </div>
+        <div id="devCurrent" class="dev-current">Current broadcast: none</div>
+      </section>
+
+      <section class="dev-panel">
+        <h3>2) Queue Manager</h3>
+        <p>Scheduled or active messages are shown below. Delete any one instantly.</p>
+        <div class="dev-table-wrap">
+          <table class="dev-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Message</th>
+                <th>Meta</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="devQueueBody">
+              <tr><td colspan="4">No queued messages.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="dev-panel">
+        <h3>3) Platform Health Snapshot</h3>
+        <div class="dev-kpis">
+          <div class="dev-kpi"><div class="dev-kpi-label">Memory RSS</div><div id="kpiMemory" class="dev-kpi-value">--</div><div class="dev-kpi-sub">MB</div></div>
+          <div class="dev-kpi"><div class="dev-kpi-label">Req / Min</div><div id="kpiReqMin" class="dev-kpi-value">--</div><div class="dev-kpi-sub">current</div></div>
+          <div class="dev-kpi"><div class="dev-kpi-label">Avg Latency</div><div id="kpiAvgLat" class="dev-kpi-value">--</div><div class="dev-kpi-sub">ms</div></div>
+          <div class="dev-kpi"><div class="dev-kpi-label">P95 Latency</div><div id="kpiP95Lat" class="dev-kpi-value">--</div><div class="dev-kpi-sub">ms</div></div>
+        </div>
+      </section>
+    </section>
+
+    <section class="dev-stack">
+      <section class="dev-panel">
+        <h3>4) Quick Presets</h3>
+        <div class="dev-presets">
+          <button class="dev-btn dev-btn-secondary dev-preset" type="button" data-type="success" data-msg="Collector completed successfully and data is current.">Collector Completed</button>
+          <button class="dev-btn dev-btn-secondary dev-preset" type="button" data-type="warn" data-msg="Roblox API is rate-limited. Some profile updates may be delayed.">API Rate Limited</button>
+          <button class="dev-btn dev-btn-secondary dev-preset" type="button" data-type="info" data-msg="Scheduled maintenance in progress. Some features may refresh slower than normal.">Maintenance Notice</button>
+          <button class="dev-btn dev-btn-secondary dev-preset" type="button" data-type="info" data-msg="Database sync is running now. Newly verified users may appear shortly.">Sync In Progress</button>
+          <button class="dev-btn dev-btn-secondary dev-preset" type="button" data-type="success" data-msg="New verified users were added to the database successfully.">New Users Added</button>
+        </div>
+      </section>
+
+      <section class="dev-panel">
+        <h3>5) Audience + Delivery</h3>
+        <div class="dev-kpis">
+          <div class="dev-kpi"><div class="dev-kpi-label">Viewers</div><div id="audViewers" class="dev-kpi-value">0</div><div class="dev-kpi-sub">active clients</div></div>
+          <div class="dev-kpi"><div class="dev-kpi-label">Seen</div><div id="audSeen" class="dev-kpi-value">0</div><div class="dev-kpi-sub">active broadcast</div></div>
+          <div class="dev-kpi"><div class="dev-kpi-label">A Variant</div><div id="audA" class="dev-kpi-value">0</div><div class="dev-kpi-sub">A/B seen</div></div>
+          <div class="dev-kpi"><div class="dev-kpi-label">B Variant</div><div id="audB" class="dev-kpi-value">0</div><div class="dev-kpi-sub">A/B seen</div></div>
+        </div>
+        <div id="audPages" class="dev-current">By page: --</div>
+      </section>
+
+      <section class="dev-panel">
+        <h3>6) Feature Flags</h3>
+        <div class="dev-actions">
+          <button id="flagAnim" class="dev-btn dev-mini dev-btn-secondary" type="button">Disable Animations: OFF</button>
+          <button id="flagStars" class="dev-btn dev-mini dev-btn-secondary" type="button">Hide Star Badges: OFF</button>
+          <button id="flagRefresh" class="dev-btn dev-mini dev-btn-secondary" type="button">Pause Auto-Refresh: OFF</button>
+        </div>
+      </section>
+
+      <section class="dev-panel">
+        <h3>7) Emergency Banner</h3>
+        <div class="dev-form">
+          <label class="dev-field">
+            <span>Banner Text</span>
+            <input id="bannerText" class="dev-input" type="text" maxlength="220" placeholder="Critical announcement...">
+          </label>
+          <div class="dev-row">
+            <label class="dev-field">
+              <span>Type</span>
+              <select id="bannerType" class="dev-select">
+                <option value="warn">Warning</option>
+                <option value="error">Error</option>
+                <option value="info">Info</option>
+                <option value="success">Success</option>
+              </select>
+            </label>
+            <label class="dev-field">
+              <span>Duration (sec, 0 = sticky)</span>
+              <input id="bannerDur" class="dev-input" type="number" min="0" max="86400" value="0">
+            </label>
+          </div>
+          <div class="dev-actions">
+            <button id="bannerSetBtn" class="dev-btn dev-btn-primary" type="button">Set Banner</button>
+            <button id="bannerClearBtn" class="dev-btn dev-btn-danger" type="button">Clear Banner</button>
+          </div>
+        </div>
+      </section>
+    </section>
+  </section>
+
+  <section class="dev-panel">
+    <h3>8) Admin History</h3>
+    <div id="devHistory" class="dev-log-list">
+      <div class="dev-log-item"><div class="dev-log-meta">Loading...</div><div class="dev-log-body">Pulling recent developer actions.</div></div>
+    </div>
+  </section>
+
+  <section class="dev-foot-actions">
+    <form method="post" action="{{ url_for('developer_logout') }}">
+      <button class="dev-btn dev-btn-secondary" type="submit">Logout</button>
+    </form>
+  </section>
+</main>
+
+<script>
+const devMsg = document.getElementById("devMsg");
+const devType = document.getElementById("devType");
+const devDuration = document.getElementById("devDuration");
+const devStartIn = document.getElementById("devStartIn");
+const devTarget = document.getElementById("devTarget");
+const devPriority = document.getElementById("devPriority");
+const devVariantA = document.getElementById("devVariantA");
+const devVariantB = document.getElementById("devVariantB");
+const devSplitPct = document.getElementById("devSplitPct");
+const devSendBtn = document.getElementById("devSendBtn");
+const devClearBtn = document.getElementById("devClearBtn");
+const devCurrent = document.getElementById("devCurrent");
+const devQueueBody = document.getElementById("devQueueBody");
+const devHistory = document.getElementById("devHistory");
+
+const audViewers = document.getElementById("audViewers");
+const audSeen = document.getElementById("audSeen");
+const audA = document.getElementById("audA");
+const audB = document.getElementById("audB");
+const audPages = document.getElementById("audPages");
+
+const flagAnim = document.getElementById("flagAnim");
+const flagStars = document.getElementById("flagStars");
+const flagRefresh = document.getElementById("flagRefresh");
+let activeFlags = {
+  disable_animations: false,
+  hide_star_badges: false,
+  pause_auto_refresh: false,
+};
+
+const bannerText = document.getElementById("bannerText");
+const bannerType = document.getElementById("bannerType");
+const bannerDur = document.getElementById("bannerDur");
+const bannerSetBtn = document.getElementById("bannerSetBtn");
+const bannerClearBtn = document.getElementById("bannerClearBtn");
+
+const kpiMemory = document.getElementById("kpiMemory");
+const kpiReqMin = document.getElementById("kpiReqMin");
+const kpiAvgLat = document.getElementById("kpiAvgLat");
+const kpiP95Lat = document.getElementById("kpiP95Lat");
+
+function toLocal(ts) {
+  const n = Number(ts || 0);
+  if (!n) return "--";
+  return new Date(n * 1000).toLocaleTimeString();
+}
+function esc(v) {
+  return String(v || "").replace(/[&<>"']/g, (ch) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[ch]));
+}
+function renderCurrent(b) {
+  if (!b) {
+    devCurrent.textContent = "Current broadcast: none";
+    return;
+  }
+  const until = b.until_ts ? new Date(Number(b.until_ts) * 1000).toLocaleTimeString() : "--";
+  const target = Array.isArray(b.targets) ? b.targets.join(", ") : "all";
+  devCurrent.textContent = `Active [${b.type}] [${b.priority}] until ${until} | target: ${target} | ${b.message}`;
+}
+function renderQueue(items) {
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    devQueueBody.innerHTML = '<tr><td colspan="4">No queued messages.</td></tr>';
+    return;
+  }
+  devQueueBody.innerHTML = rows.map((q) => {
+    const meta = [
+      `Type: ${esc(q.type)}`,
+      `Priority: ${esc(q.priority)}`,
+      `Targets: ${esc((q.targets || []).join(", "))}`,
+    ].join("<br>");
+    return `
+      <tr>
+        <td>
+          <small>Start: ${esc(toLocal(q.start_ts))}</small>
+          <small>End: ${esc(toLocal(q.end_ts))}</small>
+        </td>
+        <td>${esc(q.message)}</td>
+        <td>${meta}</td>
+        <td><button class="dev-btn dev-mini dev-btn-danger" type="button" data-del-id="${esc(q.id)}">Delete</button></td>
+      </tr>
+    `;
+  }).join("");
+  devQueueBody.querySelectorAll("[data-del-id]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteQueueItem(btn.getAttribute("data-del-id")));
+  });
+}
+function applyFlagButtonStyles() {
+  flagAnim.className = `dev-btn dev-mini ${activeFlags.disable_animations ? "dev-btn-good" : "dev-btn-secondary"}`;
+  flagStars.className = `dev-btn dev-mini ${activeFlags.hide_star_badges ? "dev-btn-good" : "dev-btn-secondary"}`;
+  flagRefresh.className = `dev-btn dev-mini ${activeFlags.pause_auto_refresh ? "dev-btn-good" : "dev-btn-secondary"}`;
+  flagAnim.textContent = `Disable Animations: ${activeFlags.disable_animations ? "ON" : "OFF"}`;
+  flagStars.textContent = `Hide Star Badges: ${activeFlags.hide_star_badges ? "ON" : "OFF"}`;
+  flagRefresh.textContent = `Pause Auto-Refresh: ${activeFlags.pause_auto_refresh ? "ON" : "OFF"}`;
+}
+
+async function loadBroadcastState() {
+  try {
+    const r = await fetch("/api/developer/broadcast", { cache: "no-store" });
+    const d = await r.json();
+    renderCurrent(d.broadcast || null);
+    renderQueue(d.queue || []);
+  } catch (_) {}
+}
+async function sendBroadcast() {
+  const message = (devMsg.value || "").trim();
+  if (!message) return;
+  const payload = {
+    message,
+    type: String(devType.value || "info"),
+    duration_sec: Number(devDuration.value || 12),
+    start_in_sec: Number(devStartIn.value || 0),
+    targets: [String(devTarget.value || "all")],
+    priority: String(devPriority.value || "normal"),
+    split_pct: Number(devSplitPct.value || 50),
+  };
+  const va = (devVariantA.value || "").trim();
+  const vb = (devVariantB.value || "").trim();
+  if (va && vb) {
+    payload.variant_a = va;
+    payload.variant_b = vb;
+  }
+  const r = await fetch("/api/developer/broadcast", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const d = await r.json();
+  if (!r.ok) {
+    alert(d.error || "Failed to send broadcast");
+    return;
+  }
+  devMsg.value = "";
+  devVariantA.value = "";
+  devVariantB.value = "";
+  renderCurrent(d.broadcast || null);
+  loadBroadcastState();
+}
+async function clearBroadcast() {
+  const r = await fetch("/api/developer/broadcast", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const d = await r.json();
+  if (!r.ok) {
+    alert(d.error || "Failed to clear broadcast");
+    return;
+  }
+  renderCurrent(null);
+  loadBroadcastState();
+}
+async function deleteQueueItem(id) {
+  if (!id) return;
+  const r = await fetch("/api/developer/broadcast", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  const d = await r.json();
+  if (!r.ok) {
+    alert(d.error || "Failed to delete queue item");
+    return;
+  }
+  loadBroadcastState();
+}
+async function loadAudience() {
+  try {
+    const r = await fetch("/api/developer/audience", { cache: "no-store" });
+    const d = await r.json();
+    if (!r.ok) return;
+    audViewers.textContent = Number(d.active_viewers || 0).toLocaleString();
+    audSeen.textContent = Number(d.active_broadcast_seen || 0).toLocaleString();
+    audA.textContent = Number((d.ab_seen || {}).a || 0).toLocaleString();
+    audB.textContent = Number((d.ab_seen || {}).b || 0).toLocaleString();
+    const byPage = d.by_page || {};
+    const parts = Object.keys(byPage).sort().map((k) => `${k}: ${byPage[k]}`);
+    audPages.textContent = `By page: ${parts.length ? parts.join(" | ") : "no live clients"}`;
+  } catch (_) {}
+}
+async function loadFlags() {
+  try {
+    const r = await fetch("/api/developer/feature_flags", { cache: "no-store" });
+    const d = await r.json();
+    if (!r.ok) return;
+    activeFlags = Object.assign(activeFlags, d.flags || {});
+    applyFlagButtonStyles();
+  } catch (_) {}
+}
+async function saveFlags() {
+  const r = await fetch("/api/developer/feature_flags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(activeFlags),
+  });
+  const d = await r.json();
+  if (!r.ok) {
+    alert(d.error || "Failed to update flags");
+    return;
+  }
+  activeFlags = Object.assign(activeFlags, d.flags || {});
+  applyFlagButtonStyles();
+}
+async function setBanner() {
+  const payload = {
+    text: String(bannerText.value || "").trim(),
+    type: String(bannerType.value || "warn"),
+    duration_sec: Number(bannerDur.value || 0),
+  };
+  const r = await fetch("/api/developer/emergency_banner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const d = await r.json();
+  if (!r.ok) {
+    alert(d.error || "Failed to set banner");
+  }
+}
+async function clearBanner() {
+  const r = await fetch("/api/developer/emergency_banner", { method: "DELETE" });
+  const d = await r.json();
+  if (!r.ok) {
+    alert(d.error || "Failed to clear banner");
+    return;
+  }
+  bannerText.value = "";
+}
+async function loadHistory() {
+  try {
+    const r = await fetch("/api/developer/history", { cache: "no-store" });
+    const d = await r.json();
+    if (!r.ok) return;
+    const items = Array.isArray(d.items) ? d.items.slice().reverse() : [];
+    if (!items.length) {
+      devHistory.innerHTML = '<div class="dev-log-item"><div class="dev-log-meta">No history</div><div class="dev-log-body">No developer actions yet.</div></div>';
+      return;
+    }
+    devHistory.innerHTML = items.slice(-30).reverse().map((it) => `
+      <div class="dev-log-item">
+        <div class="dev-log-meta">${esc(toLocal(it.ts))} | ${esc(it.action || "event")}</div>
+        <div class="dev-log-body">${esc(it.message || it.detail || "")}</div>
+      </div>
+    `).join("");
+  } catch (_) {}
+}
+async function loadPlatform() {
+  try {
+    const r = await fetch("/api/platform_status", { cache: "no-store" });
+    const d = await r.json();
+    if (!r.ok) return;
+    const rt = d.runtime || {};
+    kpiMemory.textContent = Number(rt.memory_rss_mb || 0).toLocaleString();
+    kpiReqMin.textContent = Number(rt.requests_last_minute || 0).toLocaleString();
+    kpiAvgLat.textContent = Number(rt.avg_latency_ms || 0).toLocaleString();
+    kpiP95Lat.textContent = Number(rt.p95_latency_ms || 0).toLocaleString();
+  } catch (_) {}
+}
+
+devSendBtn?.addEventListener("click", sendBroadcast);
+devClearBtn?.addEventListener("click", clearBroadcast);
+document.querySelectorAll(".dev-preset").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    devMsg.value = btn.dataset.msg || "";
+    devType.value = btn.dataset.type || "info";
+    devTarget.value = "all";
+    devPriority.value = "normal";
+  });
+});
+
+flagAnim?.addEventListener("click", async () => {
+  activeFlags.disable_animations = !activeFlags.disable_animations;
+  applyFlagButtonStyles();
+  await saveFlags();
+});
+flagStars?.addEventListener("click", async () => {
+  activeFlags.hide_star_badges = !activeFlags.hide_star_badges;
+  applyFlagButtonStyles();
+  await saveFlags();
+});
+flagRefresh?.addEventListener("click", async () => {
+  activeFlags.pause_auto_refresh = !activeFlags.pause_auto_refresh;
+  applyFlagButtonStyles();
+  await saveFlags();
+});
+
+bannerSetBtn?.addEventListener("click", setBanner);
+bannerClearBtn?.addEventListener("click", clearBanner);
+
+async function refreshAll() {
+  await Promise.all([
+    loadBroadcastState(),
+    loadAudience(),
+    loadFlags(),
+    loadHistory(),
+    loadPlatform(),
+  ]);
+}
+refreshAll();
+setInterval(refreshAll, 4000);
+</script>
+</body>
+</html>
