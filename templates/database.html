@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -114,6 +114,7 @@
             {% else %}
             <span class="badge badge-new">Newly Added</span>
             {% endif %}
+            {% if info.manual_add %}<span class="badge badge-manual">Manual Add</span>{% endif %}
             <span class="badge badge-star shiny" style="display:none;">Star Creator</span>
             {% if info.bought_tag %}<span class="badge badge-bought">Bought Check</span>{% endif %}
         </p>
@@ -133,7 +134,10 @@
                 <h3></h3>
                 <p></p>
                 <div class="extra-info"></div>
-                <a class="profile-btn" href="#" target="_blank">Open Profile</a>
+                <div class="modal-actions">
+                    <a class="profile-btn" href="#" target="_blank">Open Profile</a>
+                    <button class="evidence-btn" type="button" style="display:none;">View Evidence</button>
+                </div>
             </div>
         </div>
     </div>
@@ -144,8 +148,17 @@
     <span>Total Users: {{ total_users }}</span>
 </div>
 
-<footer>
+<div id="evidenceOverlay" class="evidence-overlay hidden">
+    <div class="evidence-panel">
+        <button id="evidenceCloseBtn" class="evidence-close" type="button" aria-label="Close evidence panel">&times;</button>
+        <h3 id="evidenceTitle">Evidence</h3>
+        <div id="evidenceBody" class="evidence-body"></div>
+    </div>
+</div>
+
+<footer class="site-footer">
 <p>Gamers Network &copy; 2026</p>
+<p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
 </footer>
 
 <div id="settings-modal" class="settings-modal hidden">

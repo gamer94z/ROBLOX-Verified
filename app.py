@@ -20,6 +20,16 @@ from database import (
     get_frontier_stats,
     save_collector_state,
     load_collector_state,
+    get_evidence_for_user,
+    add_evidence,
+    update_evidence,
+    delete_evidence,
+    delete_all_evidence_for_user,
+    get_evidence_counts,
+    add_or_update_manual_user,
+    remove_user,
+    add_admin_log,
+    get_admin_logs,
     DB_NAME,
     IS_POSTGRES,
 )
@@ -1090,6 +1100,7 @@ def admin():
         page=page,
         total=total,
         total_pages=total_pages,
+        admin_logs=get_admin_logs(120),
     )
 
 
@@ -1120,8 +1131,183 @@ def api_admin_bought_tag():
         "Bought tag updated",
         {"uid": uid, "bought_tag": bool(enabled)},
     )
+    add_admin_log(
+        "bought_tag_set" if enabled else "bought_tag_removed",
+        target_uid=uid,
+        detail=f"Bought tag {'enabled' if enabled else 'disabled'}",
+    )
 
     return jsonify({"ok": True, "uid": uid, "bought_tag": enabled})
+
+
+@app.route("/api/admin/evidence/<uid>", methods=["GET"])
+def api_admin_get_evidence(uid):
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not str(uid).isdigit():
+        return jsonify({"error": "Invalid uid"}), 400
+    return jsonify({"uid": str(uid), "items": get_evidence_for_user(uid)})
+
+
+@app.route("/api/admin/evidence", methods=["POST"])
+def api_admin_add_evidence():
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True) or {}
+    uid = str(payload.get("uid", "")).strip()
+    source_type = str(payload.get("source_type", "other")).strip().lower()[:32]
+    title = str(payload.get("title", "")).strip()[:160]
+    url = str(payload.get("url", "")).strip()[:700]
+    note = str(payload.get("note", "")).strip()[:4000]
+    if not uid.isdigit():
+        return jsonify({"error": "Invalid uid"}), 400
+    if not title and not url and not note:
+        return jsonify({"error": "Provide at least one of title, link, or note"}), 400
+
+    evidence_id = add_evidence(uid, source_type, title, url, note)
+    auto_sync_state["last_success_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
+    add_admin_log(
+        "evidence_add",
+        target_uid=uid,
+        detail=f"id={int(evidence_id)}; type={source_type}; title={title[:80]}",
+    )
+    log_monitor_event("info", "Evidence added", {"uid": uid, "evidence_id": evidence_id})
+    return jsonify({"ok": True, "id": int(evidence_id), "uid": uid})
+
+
+@app.route("/api/admin/evidence/<int:evidence_id>", methods=["PATCH"])
+def api_admin_update_evidence(evidence_id):
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True) or {}
+    source_type = str(payload.get("source_type", "other")).strip().lower()[:32]
+    title = str(payload.get("title", "")).strip()[:160]
+    url = str(payload.get("url", "")).strip()[:700]
+    note = str(payload.get("note", "")).strip()[:4000]
+    if not title and not url and not note:
+        return jsonify({"error": "Provide at least one of title, link, or note"}), 400
+    if not update_evidence(evidence_id, source_type, title, url, note):
+        return jsonify({"error": "Evidence not found"}), 404
+    auto_sync_state["last_success_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
+    add_admin_log(
+        "evidence_update",
+        target_uid="",
+        detail=f"id={int(evidence_id)}; type={source_type}; title={title[:80]}",
+    )
+    log_monitor_event("info", "Evidence updated", {"evidence_id": int(evidence_id)})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/evidence/<int:evidence_id>", methods=["DELETE"])
+def api_admin_delete_evidence(evidence_id):
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not delete_evidence(evidence_id):
+        return jsonify({"error": "Evidence not found"}), 404
+    auto_sync_state["last_success_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
+    add_admin_log("evidence_delete", target_uid="", detail=f"id={int(evidence_id)}")
+    log_monitor_event("warn", "Evidence deleted", {"evidence_id": int(evidence_id)})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/evidence/user/<uid>", methods=["DELETE"])
+def api_admin_delete_all_evidence(uid):
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not str(uid).isdigit():
+        return jsonify({"error": "Invalid uid"}), 400
+    deleted = delete_all_evidence_for_user(uid)
+    auto_sync_state["last_success_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
+    add_admin_log("evidence_delete_all", target_uid=str(uid), detail=f"deleted={int(deleted)}")
+    log_monitor_event("warn", "All evidence deleted for user", {"uid": str(uid), "deleted": int(deleted)})
+    return jsonify({"ok": True, "deleted": int(deleted)})
+
+
+@app.route("/api/evidence/<uid>")
+def api_public_evidence(uid):
+    if not str(uid).isdigit():
+        return jsonify({"error": "Invalid uid"}), 400
+    user = get_user(uid)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    items = get_evidence_for_user(uid)
+    return jsonify(
+        {
+            "uid": str(uid),
+            "username": user.get("username", ""),
+            "bought_tag": bool(user.get("bought_tag")),
+            "count": len(items),
+            "items": items,
+        }
+    )
+
+
+@app.route("/api/admin/manual_user_add", methods=["POST"])
+def api_admin_manual_user_add():
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True) or {}
+    uid = str(payload.get("uid", "")).strip()
+    status = str(payload.get("status", "Newly Added")).strip()
+    bought = bool(payload.get("bought_tag", False))
+    if not uid.isdigit():
+        return jsonify({"error": "Invalid uid"}), 400
+
+    username = payload.get("username")
+    username = str(username).strip() if username else ""
+    if not username:
+        try:
+            r = requests.get(f"{BASE_USERS}/{uid}", timeout=8)
+            if r.status_code != 200:
+                return jsonify({"error": f"Unable to fetch Roblox user ({r.status_code})"}), 400
+            username = str(r.json().get("name") or "").strip()
+        except Exception:
+            return jsonify({"error": "Failed to fetch Roblox user"}), 400
+    if not username:
+        return jsonify({"error": "Username not resolved"}), 400
+
+    add_or_update_manual_user(uid, username, status=status, bought_tag=bought)
+    auto_sync_state["last_success_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
+    add_admin_log(
+        "manual_user_add",
+        target_uid=uid,
+        detail=f"username={username}; status={status}; bought_tag={int(bought)}",
+    )
+    log_monitor_event("ok", "Manual user added", {"uid": uid, "username": username, "status": status})
+    return jsonify({"ok": True, "uid": uid, "username": username})
+
+
+@app.route("/api/admin/manual_user_remove", methods=["POST"])
+def api_admin_manual_user_remove():
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True) or {}
+    uid = str(payload.get("uid", "")).strip()
+    if not uid.isdigit():
+        return jsonify({"error": "Invalid uid"}), 400
+    if not remove_user(uid):
+        return jsonify({"error": "User not found"}), 404
+    auto_sync_state["last_success_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
+    add_admin_log("manual_user_remove", target_uid=uid, detail="User removed from database")
+    log_monitor_event("warn", "Manual user removed", {"uid": uid})
+    return jsonify({"ok": True, "uid": uid})
+
+
+@app.route("/api/admin/logs")
+def api_admin_logs():
+    if not is_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        limit = int(request.args.get("limit", 120))
+    except Exception:
+        limit = 120
+    return jsonify({"items": get_admin_logs(limit)})
 
 @app.route("/index")
 def index():
@@ -1134,6 +1320,27 @@ def index():
         page = 1
 
     db = get_all_users()  # refresh live DB
+
+    def parse_date_to_ts(date_text, end_of_day=False):
+        if not date_text:
+            return None
+        try:
+            dt = datetime.datetime.strptime(str(date_text), "%Y-%m-%d")
+            if end_of_day:
+                dt = dt + datetime.timedelta(days=1, seconds=-1)
+            return int(dt.timestamp())
+        except Exception:
+            return None
+
+    def chunked_evidence_counts(uid_iterable, chunk_size=700):
+        uid_list = [str(uid) for uid in uid_iterable if str(uid).isdigit()]
+        if not uid_list:
+            return {}
+        merged = {}
+        for i in range(0, len(uid_list), chunk_size):
+            part = uid_list[i:i + chunk_size]
+            merged.update(get_evidence_counts(part))
+        return merged
 
     # ---------------- Filter users ----------------
     if search_type == "new":
@@ -1152,11 +1359,31 @@ def index():
         length4 = request.args.get("length4")
         length5 = request.args.get("length5")
         letters_only = request.args.get("letters_only")
+        status_filter = request.args.get("status_filter", "all").strip().lower()
+        bought_filter = request.args.get("bought_filter", "all").strip().lower()
+        evidence_filter = request.args.get("evidence_filter", "all").strip().lower()
+        added_window = request.args.get("added_window", "all").strip().lower()
+        added_from = request.args.get("added_from", "").strip()
+        added_to = request.args.get("added_to", "").strip()
+        contains_numbers = request.args.get("contains_numbers", "all").strip().lower()
+        starts_with = request.args.get("starts_with", "").strip().lower()
+        ends_with = request.args.get("ends_with", "").strip().lower()
+        min_len_text = request.args.get("min_len", "").strip()
+        max_len_text = request.args.get("max_len", "").strip()
+        sort_by = request.args.get("sort_by", "username_asc").strip().lower()
 
         lengths = []
         if length3: lengths.append(3)
         if length4: lengths.append(4)
         if length5: lengths.append(5)
+
+        # status/source filtering
+        if status_filter == "seed":
+            filtered = {uid: info for uid, info in filtered.items() if info.get("source") == "Seed List"}
+        elif status_filter == "new":
+            filtered = {uid: info for uid, info in filtered.items() if info.get("source") != "Seed List"}
+        elif status_filter == "manual":
+            filtered = {uid: info for uid, info in filtered.items() if bool(info.get("manual_add"))}
 
         if lengths:
             filtered = {uid: info for uid, info in filtered.items()
@@ -1166,7 +1393,113 @@ def index():
             filtered = {uid: info for uid, info in filtered.items()
                         if info["username"].isalpha()}
 
+        if starts_with:
+            filtered = {uid: info for uid, info in filtered.items()
+                        if str(info.get("username", "")).lower().startswith(starts_with)}
+        if ends_with:
+            filtered = {uid: info for uid, info in filtered.items()
+                        if str(info.get("username", "")).lower().endswith(ends_with)}
+
+        if contains_numbers in {"yes", "no"}:
+            want_numbers = contains_numbers == "yes"
+            filtered = {
+                uid: info
+                for uid, info in filtered.items()
+                if any(ch.isdigit() for ch in str(info.get("username", ""))) == want_numbers
+            }
+
+        try:
+            min_len = max(1, int(min_len_text)) if min_len_text else None
+        except Exception:
+            min_len = None
+        try:
+            max_len = max(1, int(max_len_text)) if max_len_text else None
+        except Exception:
+            max_len = None
+        if min_len is not None:
+            filtered = {uid: info for uid, info in filtered.items() if len(str(info.get("username", ""))) >= min_len}
+        if max_len is not None:
+            filtered = {uid: info for uid, info in filtered.items() if len(str(info.get("username", ""))) <= max_len}
+
+        now_ts = int(time.time())
+        if added_window in {"24h", "7d", "14d", "30d"}:
+            days = {"24h": 1, "7d": 7, "14d": 14, "30d": 30}[added_window]
+            cutoff = now_ts - (days * 24 * 60 * 60)
+            filtered = {
+                uid: info for uid, info in filtered.items()
+                if int(info.get("first_seen_ts") or 0) >= cutoff
+            }
+
+        from_ts = parse_date_to_ts(added_from, end_of_day=False)
+        to_ts = parse_date_to_ts(added_to, end_of_day=True)
+        if from_ts is not None:
+            filtered = {
+                uid: info for uid, info in filtered.items()
+                if int(info.get("first_seen_ts") or 0) >= from_ts
+            }
+        if to_ts is not None:
+            filtered = {
+                uid: info for uid, info in filtered.items()
+                if int(info.get("first_seen_ts") or 0) <= to_ts
+            }
+
+        if bought_filter == "bought":
+            filtered = {uid: info for uid, info in filtered.items() if bool(info.get("bought_tag"))}
+        elif bought_filter == "not_bought":
+            filtered = {uid: info for uid, info in filtered.items() if not bool(info.get("bought_tag"))}
+
+        evidence_counts_map = {}
+        if evidence_filter in {"has_evidence", "no_evidence", "bought_no_evidence"}:
+            evidence_counts_map = chunked_evidence_counts(filtered.keys())
+            if evidence_filter == "has_evidence":
+                filtered = {
+                    uid: info for uid, info in filtered.items()
+                    if int(evidence_counts_map.get(str(uid), 0)) > 0
+                }
+            elif evidence_filter == "no_evidence":
+                filtered = {
+                    uid: info for uid, info in filtered.items()
+                    if int(evidence_counts_map.get(str(uid), 0)) == 0
+                }
+            elif evidence_filter == "bought_no_evidence":
+                filtered = {
+                    uid: info for uid, info in filtered.items()
+                    if bool(info.get("bought_tag")) and int(evidence_counts_map.get(str(uid), 0)) == 0
+                }
+
         total_label = f"Total Users: {len(filtered)}"
+
+        # Sorting
+        if sort_by == "username_desc":
+            sorted_items = sorted(
+                filtered.items(),
+                key=lambda it: str(it[1].get("username", "")).lower(),
+                reverse=True,
+            )
+        elif sort_by == "added_newest":
+            sorted_items = sorted(
+                filtered.items(),
+                key=lambda it: int(it[1].get("first_seen_ts") or 0),
+                reverse=True,
+            )
+        elif sort_by == "added_oldest":
+            sorted_items = sorted(
+                filtered.items(),
+                key=lambda it: int(it[1].get("first_seen_ts") or 0),
+            )
+        elif sort_by == "uid_desc":
+            sorted_items = sorted(
+                filtered.items(),
+                key=lambda it: int(it[0]) if str(it[0]).isdigit() else -1,
+                reverse=True,
+            )
+        elif sort_by == "uid_asc":
+            sorted_items = sorted(
+                filtered.items(),
+                key=lambda it: int(it[0]) if str(it[0]).isdigit() else (10**18),
+            )
+        else:
+            sorted_items = sorted(filtered.items(), key=user_sort_key)
 
     elif search_type == "individual":
         if query:
@@ -1179,7 +1512,8 @@ def index():
         filtered = {}
         total_label = ""
 
-    sorted_items = sorted(filtered.items(), key=user_sort_key)
+    if search_type != "database":
+        sorted_items = sorted(filtered.items(), key=user_sort_key)
     total_pages = math.ceil(len(sorted_items) / USERS_PER_PAGE)
     start = (page - 1) * USERS_PER_PAGE
     end = start + USERS_PER_PAGE
@@ -1273,6 +1607,7 @@ def users_batch():
 
     response = {}
     bought_map = get_bought_tags(valid_uids)
+    evidence_counts = get_evidence_counts(valid_uids)
     now = time.time()
     for uid in valid_uids:
         # Fast path: return cached star status only, do not block this endpoint on
@@ -1290,6 +1625,8 @@ def users_batch():
             "is_star_creator": star,
             "is_terminated": terminated,
             "is_bought": bought_map.get(uid, False),
+            "evidence_count": int(evidence_counts.get(uid, 0)),
+            "has_evidence": int(evidence_counts.get(uid, 0)) > 0,
         }
 
     app_logger.info("Batch checked user cards: %s users", len(valid_uids))

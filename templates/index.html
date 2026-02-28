@@ -89,8 +89,20 @@
 <!-- Database filters: only show on database page -->
 {% if search_type=='database' %}
 <section class="filter-section panel">
-    {% set has_db_filters = request.args.get('length3') or request.args.get('length4') or request.args.get('length5') or request.args.get('letters_only') %}
-    <details class="filter-dropdown" {% if has_db_filters %}open{% endif %}>
+    {% set db_filter_keys = [
+        'length3','length4','length5','letters_only',
+        'status_filter','bought_filter','evidence_filter',
+        'added_window','added_from','added_to',
+        'contains_numbers','starts_with','ends_with',
+        'min_len','max_len','sort_by'
+    ] %}
+    {% set ns = namespace(has_db_filters=false) %}
+    {% for k in db_filter_keys %}
+        {% if request.args.get(k) %}
+            {% set ns.has_db_filters = true %}
+        {% endif %}
+    {% endfor %}
+    <details class="filter-dropdown" {% if ns.has_db_filters %}open{% endif %}>
         <summary>Database Filters</summary>
         <div class="filter-dropdown-body">
     <form method="get" id="filterForm" class="filter-form">
@@ -115,7 +127,81 @@
             </label>
         </div>
 
+        <div class="filter-options">
+            <label>Status
+                <select name="status_filter">
+                    <option value="all" {% if request.args.get('status_filter','all') == 'all' %}selected{% endif %}>All</option>
+                    <option value="new" {% if request.args.get('status_filter') == 'new' %}selected{% endif %}>Newly Added</option>
+                    <option value="seed" {% if request.args.get('status_filter') == 'seed' %}selected{% endif %}>Seed List</option>
+                    <option value="manual" {% if request.args.get('status_filter') == 'manual' %}selected{% endif %}>Manual Add</option>
+                </select>
+            </label>
+            <label>Bought
+                <select name="bought_filter">
+                    <option value="all" {% if request.args.get('bought_filter','all') == 'all' %}selected{% endif %}>All</option>
+                    <option value="bought" {% if request.args.get('bought_filter') == 'bought' %}selected{% endif %}>Bought Only</option>
+                    <option value="not_bought" {% if request.args.get('bought_filter') == 'not_bought' %}selected{% endif %}>Not Bought</option>
+                </select>
+            </label>
+            <label>Evidence
+                <select name="evidence_filter">
+                    <option value="all" {% if request.args.get('evidence_filter','all') == 'all' %}selected{% endif %}>All</option>
+                    <option value="has_evidence" {% if request.args.get('evidence_filter') == 'has_evidence' %}selected{% endif %}>Has Evidence</option>
+                    <option value="no_evidence" {% if request.args.get('evidence_filter') == 'no_evidence' %}selected{% endif %}>No Evidence</option>
+                    <option value="bought_no_evidence" {% if request.args.get('evidence_filter') == 'bought_no_evidence' %}selected{% endif %}>Bought + No Evidence</option>
+                </select>
+            </label>
+            <label>Added Window
+                <select name="added_window">
+                    <option value="all" {% if request.args.get('added_window','all') == 'all' %}selected{% endif %}>All Time</option>
+                    <option value="24h" {% if request.args.get('added_window') == '24h' %}selected{% endif %}>Last 24h</option>
+                    <option value="7d" {% if request.args.get('added_window') == '7d' %}selected{% endif %}>Last 7d</option>
+                    <option value="14d" {% if request.args.get('added_window') == '14d' %}selected{% endif %}>Last 14d</option>
+                    <option value="30d" {% if request.args.get('added_window') == '30d' %}selected{% endif %}>Last 30d</option>
+                </select>
+            </label>
+            <label>Contains Numbers
+                <select name="contains_numbers">
+                    <option value="all" {% if request.args.get('contains_numbers','all') == 'all' %}selected{% endif %}>All</option>
+                    <option value="yes" {% if request.args.get('contains_numbers') == 'yes' %}selected{% endif %}>Yes</option>
+                    <option value="no" {% if request.args.get('contains_numbers') == 'no' %}selected{% endif %}>No</option>
+                </select>
+            </label>
+            <label>Sort
+                <select name="sort_by">
+                    <option value="username_asc" {% if request.args.get('sort_by','username_asc') == 'username_asc' %}selected{% endif %}>Username A-Z</option>
+                    <option value="username_desc" {% if request.args.get('sort_by') == 'username_desc' %}selected{% endif %}>Username Z-A</option>
+                    <option value="added_newest" {% if request.args.get('sort_by') == 'added_newest' %}selected{% endif %}>Newest Added</option>
+                    <option value="added_oldest" {% if request.args.get('sort_by') == 'added_oldest' %}selected{% endif %}>Oldest Added</option>
+                    <option value="uid_asc" {% if request.args.get('sort_by') == 'uid_asc' %}selected{% endif %}>User ID Asc</option>
+                    <option value="uid_desc" {% if request.args.get('sort_by') == 'uid_desc' %}selected{% endif %}>User ID Desc</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="filter-options">
+            <label>Added From
+                <input type="date" name="added_from" value="{{ request.args.get('added_from','') }}">
+            </label>
+            <label>Added To
+                <input type="date" name="added_to" value="{{ request.args.get('added_to','') }}">
+            </label>
+            <label>Starts With
+                <input type="text" name="starts_with" maxlength="10" value="{{ request.args.get('starts_with','') }}" placeholder="e.g. a">
+            </label>
+            <label>Ends With
+                <input type="text" name="ends_with" maxlength="10" value="{{ request.args.get('ends_with','') }}" placeholder="e.g. x">
+            </label>
+            <label>Min Length
+                <input type="number" name="min_len" min="1" max="30" value="{{ request.args.get('min_len','') }}">
+            </label>
+            <label>Max Length
+                <input type="number" name="max_len" min="1" max="30" value="{{ request.args.get('max_len','') }}">
+            </label>
+        </div>
+
         <button type="submit" class="apply-filters-btn">Apply Filters</button>
+        <a class="apply-filters-btn" href="{{ url_for('index') }}?search_type=database" style="text-decoration:none; display:inline-flex; align-items:center;">Clear</a>
     </form>
         </div>
     </details>
@@ -138,6 +224,7 @@
             {% else %}
             <span class="badge badge-new">Newly Added</span>
             {% endif %}
+            {% if info.manual_add %}<span class="badge badge-manual">Manual Add</span>{% endif %}
             <span class="badge badge-star shiny" style="display:none;">Star Creator</span>
             {% if info.bought_tag %}<span class="badge badge-bought">Bought Check</span>{% endif %}
         </p>
@@ -157,7 +244,10 @@
                 <h3></h3>
                 <p></p>
                 <div class="extra-info"></div>
-                <a class="profile-btn" href="#" target="_blank">Open Profile</a>
+                <div class="modal-actions">
+                    <a class="profile-btn" href="#" target="_blank">Open Profile</a>
+                    <button class="evidence-btn" type="button" style="display:none;">View Evidence</button>
+                </div>
             </div>
         </div>
     </div>
@@ -167,19 +257,27 @@
 <!-- Pagination -->
 <div class="pagination panel">
 
-    {% set filters = "" %}
+    {% set q = namespace(filters="") %}
     {% if search_type == 'database' %}
-        {% if request.args.get('length3') %}{% set filters = filters + "&length3=on" %}{% endif %}
-        {% if request.args.get('length4') %}{% set filters = filters + "&length4=on" %}{% endif %}
-        {% if request.args.get('length5') %}{% set filters = filters + "&length5=on" %}{% endif %}
-        {% if request.args.get('letters_only') %}{% set filters = filters + "&letters_only=on" %}{% endif %}
+        {% set db_filter_keys = [
+            'length3','length4','length5','letters_only',
+            'status_filter','bought_filter','evidence_filter',
+            'added_window','added_from','added_to',
+            'contains_numbers','starts_with','ends_with',
+            'min_len','max_len','sort_by'
+        ] %}
+        {% for key in db_filter_keys %}
+            {% if request.args.get(key) %}
+                {% set q.filters = q.filters + "&" + key + "=" + request.args.get(key) %}
+            {% endif %}
+        {% endfor %}
     {% endif %}
     {% if search_type=='individual' and query %}
-        {% set filters = filters + "&query=" + query %}
+        {% set q.filters = q.filters + "&query=" + query %}
     {% endif %}
 
     <!-- First page always -->
-    <a href="?page=1&search_type={{search_type}}{{ filters }}" class="{% if page==1 %}active{% endif %}">1</a>
+    <a href="?page=1&search_type={{search_type}}{{ q.filters }}" class="{% if page==1 %}active{% endif %}">1</a>
 
     {% set window = 2 %}
     {% set start_page = page - window %}
@@ -191,13 +289,13 @@
     {% if start_page > 2 %}<span>...</span>{% endif %}
 
     {% for p in range(start_page, end_page +1) %}
-        <a href="?page={{p}}&search_type={{search_type}}{{ filters }}" class="{% if p==page %}active{% endif %}">{{p}}</a>
+        <a href="?page={{p}}&search_type={{search_type}}{{ q.filters }}" class="{% if p==page %}active{% endif %}">{{p}}</a>
     {% endfor %}
 
     {% if end_page < total_pages -1 %}<span>...</span>{% endif %}
 
     {% if total_pages > 1 %}
-        <a href="?page={{total_pages}}&search_type={{search_type}}{{ filters }}" class="{% if page==total_pages %}active{% endif %}">{{total_pages}}</a>
+        <a href="?page={{total_pages}}&search_type={{search_type}}{{ q.filters }}" class="{% if page==total_pages %}active{% endif %}">{{total_pages}}</a>
     {% endif %}
 
     <!-- Jump To Page -->
@@ -205,13 +303,22 @@
     <button type="button" id="jumpPageBtn">Go</button>
 
     {% if page < total_pages %}
-        <a href="?page={{page+1}}&search_type={{search_type}}{{ filters }}">Next &raquo;</a>
+        <a href="?page={{page+1}}&search_type={{search_type}}{{ q.filters }}">Next &raquo;</a>
     {% endif %}
 
 </div>
 
-<footer>
+<div id="evidenceOverlay" class="evidence-overlay hidden">
+    <div class="evidence-panel">
+        <button id="evidenceCloseBtn" class="evidence-close" type="button" aria-label="Close evidence panel">&times;</button>
+        <h3 id="evidenceTitle">Evidence</h3>
+        <div id="evidenceBody" class="evidence-body"></div>
+    </div>
+</div>
+
+<footer class="site-footer">
 <p>Gamers Network &copy; 2026</p>
+<p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
 </footer>
 
 <div id="settings-modal" class="settings-modal hidden">
@@ -256,7 +363,13 @@ document.getElementById("jumpPageBtn").addEventListener("click", function() {
     url.searchParams.set("page", page);
 
     // Preserve filters and query
-    {% for key in ['length3','length4','length5','letters_only','query'] %}
+    {% for key in [
+        'length3','length4','length5','letters_only',
+        'status_filter','bought_filter','evidence_filter',
+        'added_window','added_from','added_to',
+        'contains_numbers','starts_with','ends_with',
+        'min_len','max_len','sort_by','query'
+    ] %}
         {% if request.args.get(key) %}
             url.searchParams.set("{{ key }}", "{{ request.args.get(key) }}");
         {% endif %}

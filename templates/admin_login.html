@@ -10,6 +10,11 @@
     <h1>Gamers Network</h1>
     <p>Admin Access Console</p>
 </header>
+<button class="admin-corner-btn" id="cornerSettingsBtn" title="Settings" aria-label="Open Settings" type="button">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.13-.54 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z" fill="currentColor"/>
+    </svg>
+</button>
 
 <main class="admin-auth-main">
     <section class="panel admin-auth-card">
@@ -38,5 +43,57 @@
         </form>
     </section>
 </main>
+
+<footer class="site-footer">
+    <p>Gamers Network &copy; 2026</p>
+    <p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
+</footer>
+
+<div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-header">Control Center <span id="closeSettings">&times;</span></div>
+    <div class="settings-body">
+        <div class="settings-group">
+            <p class="settings-label">Theme</p>
+            <div class="settings-row">
+                <button id="lightModeBtn" class="settings-btn" type="button">Light</button>
+                <button id="darkModeBtn" class="settings-btn" type="button">Dark</button>
+            </div>
+        </div>
+        <button id="resetSettingsBtn" class="settings-reset" type="button">Reset Theme</button>
+    </div>
+</div>
+
+<script>
+(function () {
+    const body = document.body;
+    const settingsModal = document.getElementById("settings-modal");
+    const cornerSettingsBtn = document.getElementById("cornerSettingsBtn");
+    const closeSettings = document.getElementById("closeSettings");
+    const darkModeBtn = document.getElementById("darkModeBtn");
+    const lightModeBtn = document.getElementById("lightModeBtn");
+    const resetSettingsBtn = document.getElementById("resetSettingsBtn");
+    const storedTheme = localStorage.getItem("theme");
+
+    if (storedTheme === "dark" || storedTheme === "light") {
+        body.classList.toggle("dark-mode", storedTheme === "dark");
+    }
+
+    cornerSettingsBtn?.addEventListener("click", () => settingsModal?.classList.toggle("hidden"));
+    closeSettings?.addEventListener("click", () => settingsModal?.classList.add("hidden"));
+
+    darkModeBtn?.addEventListener("click", () => {
+        body.classList.add("dark-mode");
+        localStorage.setItem("theme", "dark");
+    });
+    lightModeBtn?.addEventListener("click", () => {
+        body.classList.remove("dark-mode");
+        localStorage.setItem("theme", "light");
+    });
+    resetSettingsBtn?.addEventListener("click", () => {
+        body.classList.remove("dark-mode");
+        localStorage.setItem("theme", "light");
+    });
+})();
+</script>
 </body>
 </html>

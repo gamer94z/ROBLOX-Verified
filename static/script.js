@@ -9,6 +9,10 @@ let lastDbMtime = null;
 let liveStatusPollHandle = null;
 let batchLoadRunId = 0;
 const AVATAR_PLACEHOLDER = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%230f172a'/%3E%3Cstop offset='1' stop-color='%231e3a8a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='120' height='120' rx='60' fill='url(%23g)'/%3E%3Ccircle cx='60' cy='46' r='22' fill='%2393c5fd' fill-opacity='0.9'/%3E%3Cpath d='M24 103c6-17 20-28 36-28s30 11 36 28' fill='%2393c5fd' fill-opacity='0.9'/%3E%3C/svg%3E";
+const evidenceOverlay = document.getElementById("evidenceOverlay");
+const evidenceCloseBtn = document.getElementById("evidenceCloseBtn");
+const evidenceTitle = document.getElementById("evidenceTitle");
+const evidenceBody = document.getElementById("evidenceBody");
 
 function installAvatarFallback(img) {
     if (!img) return;
@@ -33,6 +37,48 @@ function markAvatarLoaded(img) {
     img.classList.remove("loading-avatar");
     const shell = img.closest(".avatar-shell");
     if (shell) shell.classList.add("is-ready");
+}
+
+function closeEvidenceOverlay() {
+    if (!evidenceOverlay) return;
+    evidenceOverlay.classList.add("hidden");
+}
+
+async function openEvidenceOverlay(uid, username) {
+    if (!evidenceOverlay || !evidenceBody || !evidenceTitle) return;
+    evidenceOverlay.classList.remove("hidden");
+    evidenceTitle.innerText = `Evidence - ${username} (${uid})`;
+    evidenceBody.innerHTML = '<div class="evidence-empty">Loading evidence...</div>';
+    try {
+        const res = await fetch(`/api/evidence/${uid}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load evidence");
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) {
+            evidenceBody.innerHTML = '<div class="evidence-empty">No evidence has been attached for this profile yet.</div>';
+            return;
+        }
+        evidenceBody.innerHTML = "";
+        items.forEach((item, idx) => {
+            const box = document.createElement("div");
+            box.className = "evidence-item";
+            const when = item.updated_ts ? new Date(item.updated_ts * 1000).toLocaleString() : "Unknown";
+            const safeTitle = item.title || `Evidence ${idx + 1}`;
+            const urlPart = item.url
+                ? `<div><a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a></div>`
+                : "";
+            const notePart = item.note ? `<div class="note">${item.note}</div>` : "";
+            box.innerHTML = `
+                <div class="head"><span>${item.source_type || "other"}</span><span>${when}</span></div>
+                <div class="title">${safeTitle}</div>
+                ${urlPart}
+                ${notePart}
+            `;
+            evidenceBody.appendChild(box);
+        });
+    } catch (err) {
+        evidenceBody.innerHTML = `<div class="evidence-empty">${err?.message || "Unable to load evidence."}</div>`;
+    }
 }
 
 function updatePageLoadUI(stageText, loaded, total) {
@@ -287,6 +333,8 @@ function batchFetchAvatars() {
                     is_star_creator: !!payload.is_star_creator,
                     is_terminated: payload.is_terminated,
                     is_bought: !!payload.is_bought,
+                    evidence_count: Number(payload.evidence_count || 0),
+                    has_evidence: !!payload.has_evidence,
                 };
 
                 if (card && payload.is_terminated) {
@@ -378,12 +426,14 @@ function setupCardModal(card, uid) {
     const pSource = modal.querySelector("p");
     const extra = modal.querySelector(".extra-info");
     const profileBtn = modal.querySelector(".profile-btn");
+    const evidenceBtn = modal.querySelector(".evidence-btn");
 
     card.addEventListener("click", () => {
         modal.classList.add("show");
         modalContent.classList.add("is-loading");
         header.innerHTML = ""; pSource.innerHTML = ""; extra.innerHTML = "";
         profileBtn.style.display = "none";
+        if (evidenceBtn) evidenceBtn.style.display = "none";
 
         if (loadingIndicator) loadingIndicator.style.display = "flex";
         loadingText.style.display = "block";
@@ -397,14 +447,17 @@ function setupCardModal(card, uid) {
             if (!data) {
                 modalContent.classList.remove("is-loading");
                 profileBtn.style.display = "none";
+                if (evidenceBtn) evidenceBtn.style.display = "none";
                 extra.innerHTML = "Error loading user";
                 return;
             }
 
             const sourceHTML = `
                 ${data.stored.source === "Seed List" ? `<span class="badge badge-seed">${data.stored.source}</span>` : `<span class="badge badge-new">Newly Added</span>`}
+                ${data.stored?.manual_add ? '<span class="badge badge-manual">Manual Add</span>' : ''}
                 ${data.is_star_creator ? '<span class="badge badge-star shiny">Star Creator</span>' : ''}
                 ${data.stored?.bought_tag ? '<span class="badge badge-bought">Bought Check</span>' : ''}
+                ${data.stored?.bought_tag && Number(userDataCache[uid]?.evidence_count || 0) > 0 ? `<span class="badge badge-new">Evidence ${Number(userDataCache[uid]?.evidence_count || 0)}</span>` : ''}
             `;
 
             header.innerHTML = `${data.stored.username} (${uid})`;
@@ -427,6 +480,15 @@ function setupCardModal(card, uid) {
 
             profileBtn.href = data.profile_url;
             profileBtn.style.display = "inline-block";
+            if (evidenceBtn) {
+                if (data.stored?.bought_tag) {
+                    evidenceBtn.style.display = "inline-block";
+                    evidenceBtn.onclick = () => openEvidenceOverlay(uid, data.stored?.username || uid);
+                } else {
+                    evidenceBtn.style.display = "none";
+                    evidenceBtn.onclick = null;
+                }
+            }
             requestAnimationFrame(() => modalContent.classList.remove("is-loading"));
         });
     });
@@ -436,6 +498,14 @@ function setupCardModal(card, uid) {
         modalContent.classList.remove("is-loading");
     });
 }
+
+evidenceCloseBtn?.addEventListener("click", closeEvidenceOverlay);
+evidenceOverlay?.addEventListener("click", (e) => {
+    if (e.target === evidenceOverlay) closeEvidenceOverlay();
+});
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeEvidenceOverlay();
+});
 
 // ---------------- Setup all cards ----------------
 document.querySelectorAll(".user-card").forEach(c => setupCardModal(c, c.dataset.uid));

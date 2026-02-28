@@ -102,6 +102,54 @@ body.monitor-page {
 .mini-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
 .mini-table th, .mini-table td { border-bottom:1px solid #1f2937; padding:0.35rem; text-align:left; }
 .mini-table th { color:#7dd3fc; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; }
+body.monitor-page:not(.dark-mode) {
+    background: radial-gradient(circle at 10% -10%, rgba(14,165,233,0.12), transparent 45%), #f8fbff;
+    color: #0f172a;
+}
+body.monitor-page:not(.dark-mode) .monitor-panel {
+    border-color: #cbd5e1;
+    background: linear-gradient(155deg, #ffffff, #f8fbff);
+}
+body.monitor-page:not(.dark-mode) .monitor-panel h2,
+body.monitor-page:not(.dark-mode) .monitor-stage .title,
+body.monitor-page:not(.dark-mode) .recent-table th,
+body.monitor-page:not(.dark-mode) .mini-table th {
+    color: #1d4ed8;
+}
+body.monitor-page:not(.dark-mode) .trend-canvas {
+    border-color: #cbd5e1;
+    background: rgba(255,255,255,0.9);
+}
+body.monitor-page:not(.dark-mode) .monitor-stat,
+body.monitor-page:not(.dark-mode) .monitor-stage,
+body.monitor-page:not(.dark-mode) .step,
+body.monitor-page:not(.dark-mode) .op-msg,
+body.monitor-page:not(.dark-mode) .log-row {
+    border-color: #cbd5e1;
+    background: rgba(255,255,255,0.92);
+}
+body.monitor-page:not(.dark-mode) .monitor-stat .k,
+body.monitor-page:not(.dark-mode) .monitor-stage .detail,
+body.monitor-page:not(.dark-mode) .meta,
+body.monitor-page:not(.dark-mode) .op-msg .head,
+body.monitor-page:not(.dark-mode) .log-row .t,
+body.monitor-page:not(.dark-mode) .step {
+    color: #475569;
+}
+body.monitor-page:not(.dark-mode) .monitor-stage .stage,
+body.monitor-page:not(.dark-mode) .op-msg .body,
+body.monitor-page:not(.dark-mode) .operator-name {
+    color: #0f172a;
+}
+body.monitor-page:not(.dark-mode) .recent-table th,
+body.monitor-page:not(.dark-mode) .recent-table td,
+body.monitor-page:not(.dark-mode) .mini-table th,
+body.monitor-page:not(.dark-mode) .mini-table td {
+    border-bottom-color: #e2e8f0;
+}
+body.monitor-page:not(.dark-mode) .pill {
+    border-color: #cbd5e1;
+}
 @media (max-width: 940px) {
     .monitor-grid { grid-template-columns: 1fr; }
     .monitor-stats { grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -110,7 +158,7 @@ body.monitor-page {
 }
 </style>
 </head>
-<body class="main-app dark-mode monitor-page">
+<body class="main-app monitor-page">
 <header>
     <h1>Collector Monitor</h1>
     <p>Live runtime details, recent updates, and event logs</p>
@@ -121,9 +169,12 @@ body.monitor-page {
 <a class="admin-corner-btn monitor-corner-btn" href="{{ url_for('collector_monitor') }}" title="Collector Monitor" aria-label="Open Collector Monitor">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 5h16v11H4V5zm2 2v7h12V7H6zm3 10h6v2H9v-2z" fill="currentColor"/></svg>
 </a>
-<a class="admin-corner-btn" href="{{ url_for('admin') }}" title="Admin Panel" aria-label="Open Admin Panel">
+<a class="admin-corner-btn settings-corner-btn" href="{{ url_for('admin') }}" title="Admin Panel" aria-label="Open Admin Panel">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2L4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5l-8-3zm0 2.2l6 2.3V11c0 4.2-2.7 8.2-6 9.2-3.3-1-6-5-6-9.2V6.5l6-2.3z" fill="currentColor"/></svg>
 </a>
+<button class="admin-corner-btn" id="cornerSettingsBtn" title="Settings" aria-label="Open Settings" type="button">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.13-.54 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z" fill="currentColor"/></svg>
+</button>
 
 <main class="monitor-wrap">
     <section class="monitor-panel">
@@ -220,7 +271,57 @@ body.monitor-page {
     </section>
 </main>
 
+<footer class="site-footer">
+    <p>Gamers Network &copy; 2026</p>
+    <p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
+</footer>
+
+<div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-header">Control Center <span id="closeSettings">&times;</span></div>
+    <div class="settings-body">
+        <div class="settings-group">
+            <p class="settings-label">Theme</p>
+            <div class="settings-row">
+                <button id="lightModeBtn" class="settings-btn" type="button">Light</button>
+                <button id="darkModeBtn" class="settings-btn" type="button">Dark</button>
+            </div>
+        </div>
+        <button id="resetSettingsBtn" class="settings-reset" type="button">Reset Theme</button>
+    </div>
+</div>
+
 <script>
+(function () {
+    const body = document.body;
+    const settingsModal = document.getElementById("settings-modal");
+    const cornerSettingsBtn = document.getElementById("cornerSettingsBtn");
+    const closeSettings = document.getElementById("closeSettings");
+    const darkModeBtn = document.getElementById("darkModeBtn");
+    const lightModeBtn = document.getElementById("lightModeBtn");
+    const resetSettingsBtn = document.getElementById("resetSettingsBtn");
+    const storedTheme = localStorage.getItem("theme");
+
+    if (storedTheme === "dark" || storedTheme === "light") {
+        body.classList.toggle("dark-mode", storedTheme === "dark");
+    }
+
+    cornerSettingsBtn?.addEventListener("click", () => settingsModal?.classList.toggle("hidden"));
+    closeSettings?.addEventListener("click", () => settingsModal?.classList.add("hidden"));
+
+    darkModeBtn?.addEventListener("click", () => {
+        body.classList.add("dark-mode");
+        localStorage.setItem("theme", "dark");
+    });
+    lightModeBtn?.addEventListener("click", () => {
+        body.classList.remove("dark-mode");
+        localStorage.setItem("theme", "light");
+    });
+    resetSettingsBtn?.addEventListener("click", () => {
+        body.classList.remove("dark-mode");
+        localStorage.setItem("theme", "light");
+    });
+})();
+
 let lastEventId = 0;
 let eventsBootstrapped = false;
 let eventQueue = [];

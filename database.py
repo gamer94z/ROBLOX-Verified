@@ -56,7 +56,8 @@ def _create_users_table(conn):
                 username TEXT NOT NULL,
                 status TEXT NOT NULL,
                 first_seen_ts BIGINT NOT NULL,
-                bought_tag INTEGER NOT NULL DEFAULT 0
+                bought_tag INTEGER NOT NULL DEFAULT 0,
+                manual_add INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -68,7 +69,8 @@ def _create_users_table(conn):
                 username TEXT NOT NULL,
                 status TEXT NOT NULL,
                 first_seen_ts INTEGER NOT NULL,
-                bought_tag INTEGER NOT NULL DEFAULT 0
+                bought_tag INTEGER NOT NULL DEFAULT 0,
+                manual_add INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -146,6 +148,80 @@ def _migrate_collector_state_if_needed(conn):
     _create_collector_state_table(conn)
 
 
+def _create_admin_logs_table(conn):
+    cur = conn.cursor()
+    if IS_POSTGRES:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_logs (
+                id BIGSERIAL PRIMARY KEY,
+                action TEXT NOT NULL,
+                target_uid TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '',
+                created_ts BIGINT NOT NULL
+            )
+            """
+        )
+    else:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                target_uid TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '',
+                created_ts INTEGER NOT NULL
+            )
+            """
+        )
+    conn.commit()
+
+
+def _migrate_admin_logs_if_needed(conn):
+    _create_admin_logs_table(conn)
+
+
+def _create_evidence_table(conn):
+    cur = conn.cursor()
+    if IS_POSTGRES:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS evidence (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'other',
+                title TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_ts BIGINT NOT NULL,
+                updated_ts BIGINT NOT NULL
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS evidence_user_idx ON evidence(user_id)")
+    else:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'other',
+                title TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_ts INTEGER NOT NULL,
+                updated_ts INTEGER NOT NULL
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS evidence_user_idx ON evidence(user_id)")
+    conn.commit()
+
+
+def _migrate_evidence_if_needed(conn):
+    _create_evidence_table(conn)
+
+
 def _migrate_users_table_if_needed(conn):
     cur = conn.cursor()
     if IS_POSTGRES:
@@ -158,6 +234,8 @@ def _migrate_users_table_if_needed(conn):
             )
         if "bought_tag" not in cols:
             cur.execute("ALTER TABLE users ADD COLUMN bought_tag INTEGER NOT NULL DEFAULT 0")
+        if "manual_add" not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN manual_add INTEGER NOT NULL DEFAULT 0")
         conn.commit()
         return
 
@@ -169,7 +247,7 @@ def _migrate_users_table_if_needed(conn):
         return
 
     cols = _get_table_columns(conn, "users")
-    expected = {"user_id", "username", "status", "first_seen_ts", "bought_tag"}
+    expected = {"user_id", "username", "status", "first_seen_ts", "bought_tag", "manual_add"}
 
     if set(cols) == expected:
         return
@@ -181,11 +259,18 @@ def _migrate_users_table_if_needed(conn):
         )
         if "bought_tag" not in cols:
             cur.execute("ALTER TABLE users ADD COLUMN bought_tag INTEGER NOT NULL DEFAULT 0")
+        if "manual_add" not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN manual_add INTEGER NOT NULL DEFAULT 0")
         conn.commit()
         return
 
     if {"user_id", "username", "status", "first_seen_ts"}.issubset(set(cols)) and "bought_tag" not in cols:
         cur.execute("ALTER TABLE users ADD COLUMN bought_tag INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+        return
+
+    if {"user_id", "username", "status", "first_seen_ts", "bought_tag"}.issubset(set(cols)) and "manual_add" not in cols:
+        cur.execute("ALTER TABLE users ADD COLUMN manual_add INTEGER NOT NULL DEFAULT 0")
         conn.commit()
         return
 
@@ -196,9 +281,10 @@ def _migrate_users_table_if_needed(conn):
 
     if {"user_id", "username", "status"}.issubset(set(legacy_cols)):
         bought_expr = "COALESCE(bought_tag, 0)" if "bought_tag" in legacy_cols else "0"
+        manual_expr = "COALESCE(manual_add, 0)" if "manual_add" in legacy_cols else "0"
         cur.execute(
             """
-            INSERT OR IGNORE INTO users (user_id, username, status, first_seen_ts, bought_tag)
+            INSERT OR IGNORE INTO users (user_id, username, status, first_seen_ts, bought_tag, manual_add)
             SELECT
                 CAST(user_id AS TEXT),
                 username,
@@ -206,6 +292,9 @@ def _migrate_users_table_if_needed(conn):
                 COALESCE(first_seen_ts, strftime('%s','now')),
                 """
             + bought_expr
+            + """,
+                """
+            + manual_expr
             + """
             FROM users_legacy
             """
@@ -213,12 +302,13 @@ def _migrate_users_table_if_needed(conn):
     elif {"id", "username", "source"}.issubset(set(legacy_cols)):
         cur.execute(
             """
-            INSERT OR IGNORE INTO users (user_id, username, status, first_seen_ts, bought_tag)
+            INSERT OR IGNORE INTO users (user_id, username, status, first_seen_ts, bought_tag, manual_add)
             SELECT
                 CAST(id AS TEXT),
                 username,
                 source,
                 strftime('%s','now'),
+                0,
                 0
             FROM users_legacy
             """
@@ -234,6 +324,8 @@ def init_db():
         _migrate_users_table_if_needed(conn)
         _migrate_candidate_frontier_if_needed(conn)
         _migrate_collector_state_if_needed(conn)
+        _migrate_admin_logs_if_needed(conn)
+        _migrate_evidence_if_needed(conn)
     finally:
         conn.close()
 
@@ -241,18 +333,19 @@ def init_db():
 def get_all_users():
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT user_id, username, status, first_seen_ts, bought_tag FROM users")
+    c.execute("SELECT user_id, username, status, first_seen_ts, bought_tag, manual_add FROM users")
     rows = c.fetchall()
     conn.close()
 
     users = {}
-    for user_id, username, status, first_seen_ts, bought_tag in rows:
+    for user_id, username, status, first_seen_ts, bought_tag, manual_add in rows:
         uid = int(user_id) if str(user_id).isdigit() else user_id
         users[uid] = {
             "username": username,
             "source": status,
             "first_seen_ts": int(first_seen_ts),
             "bought_tag": bool(bought_tag),
+            "manual_add": bool(manual_add),
         }
 
     return users
@@ -263,7 +356,7 @@ def get_user(uid):
     c = conn.cursor()
     p = _placeholder()
     c.execute(
-        f"SELECT username, status, first_seen_ts, bought_tag FROM users WHERE user_id={p}",
+        f"SELECT username, status, first_seen_ts, bought_tag, manual_add FROM users WHERE user_id={p}",
         (str(uid),),
     )
     row = c.fetchone()
@@ -275,6 +368,7 @@ def get_user(uid):
             "source": row[1],
             "first_seen_ts": int(row[2]),
             "bought_tag": bool(row[3]),
+            "manual_add": bool(row[4]),
         }
     return None
 
@@ -470,3 +564,229 @@ def load_collector_state():
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def get_evidence_for_user(uid):
+    uid_text = str(uid)
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    cur.execute(
+        f"""
+        SELECT id, user_id, source_type, title, url, note, created_ts, updated_ts
+        FROM evidence
+        WHERE user_id={p}
+        ORDER BY updated_ts DESC, id DESC
+        """,
+        (uid_text,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        result.append(
+            {
+                "id": int(row[0]),
+                "user_id": str(row[1]),
+                "source_type": row[2] or "other",
+                "title": row[3] or "",
+                "url": row[4] or "",
+                "note": row[5] or "",
+                "created_ts": int(row[6] or 0),
+                "updated_ts": int(row[7] or 0),
+            }
+        )
+    return result
+
+
+def add_evidence(uid, source_type, title, url, note):
+    uid_text = str(uid)
+    now_ts = int(time.time())
+    source = (source_type or "other").strip().lower()[:32]
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    if IS_POSTGRES:
+        cur.execute(
+            f"""
+            INSERT INTO evidence (user_id, source_type, title, url, note, created_ts, updated_ts)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p})
+            RETURNING id
+            """,
+            (uid_text, source or "other", title or "", url or "", note or "", now_ts, now_ts),
+        )
+        row = cur.fetchone()
+        evidence_id = int(row[0]) if row else 0
+    else:
+        cur.execute(
+            f"""
+            INSERT INTO evidence (user_id, source_type, title, url, note, created_ts, updated_ts)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p})
+            """,
+            (uid_text, source or "other", title or "", url or "", note or "", now_ts, now_ts),
+        )
+        evidence_id = int(cur.lastrowid or 0)
+    conn.commit()
+    conn.close()
+    return evidence_id
+
+
+def update_evidence(evidence_id, source_type, title, url, note):
+    now_ts = int(time.time())
+    source = (source_type or "other").strip().lower()[:32]
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    cur.execute(
+        f"""
+        UPDATE evidence
+        SET source_type={p}, title={p}, url={p}, note={p}, updated_ts={p}
+        WHERE id={p}
+        """,
+        (source or "other", title or "", url or "", note or "", now_ts, int(evidence_id)),
+    )
+    changed = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def delete_evidence(evidence_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    cur.execute(f"DELETE FROM evidence WHERE id={p}", (int(evidence_id),))
+    changed = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def delete_all_evidence_for_user(uid):
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    cur.execute(f"DELETE FROM evidence WHERE user_id={p}", (str(uid),))
+    deleted = int(cur.rowcount or 0)
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def get_evidence_counts(uids):
+    valid = [str(uid) for uid in uids if str(uid).isdigit()]
+    if not valid:
+        return {}
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    placeholders = ",".join(p for _ in valid)
+    cur.execute(
+        f"""
+        SELECT user_id, COUNT(*)
+        FROM evidence
+        WHERE user_id IN ({placeholders})
+        GROUP BY user_id
+        """,
+        valid,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {str(uid): int(count or 0) for uid, count in rows}
+
+
+def add_or_update_manual_user(uid, username, status="Newly Added", bought_tag=False):
+    uid_text = str(uid)
+    now_ts = int(time.time())
+    status_text = "Seed List" if str(status).lower().startswith("seed") else "Newly Added"
+    bought = 1 if bought_tag else 0
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    if IS_POSTGRES:
+        cur.execute(
+            f"""
+            INSERT INTO users (user_id, username, status, first_seen_ts, bought_tag, manual_add)
+            VALUES ({p}, {p}, {p}, {p}, {p}, 1)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = EXCLUDED.username,
+                status = EXCLUDED.status,
+                bought_tag = EXCLUDED.bought_tag,
+                manual_add = 1
+            """,
+            (uid_text, username, status_text, now_ts, bought),
+        )
+    else:
+        cur.execute(
+            f"""
+            INSERT INTO users (user_id, username, status, first_seen_ts, bought_tag, manual_add)
+            VALUES ({p}, {p}, {p}, {p}, {p}, 1)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
+                status = excluded.status,
+                bought_tag = excluded.bought_tag,
+                manual_add = 1
+            """,
+            (uid_text, username, status_text, now_ts, bought),
+        )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def remove_user(uid):
+    uid_text = str(uid)
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    cur.execute(f"DELETE FROM users WHERE user_id={p}", (uid_text,))
+    deleted_users = int(cur.rowcount or 0)
+    cur.execute(f"DELETE FROM evidence WHERE user_id={p}", (uid_text,))
+    cur.execute(f"DELETE FROM candidate_frontier WHERE user_id={p}", (uid_text,))
+    conn.commit()
+    conn.close()
+    return deleted_users > 0
+
+
+def add_admin_log(action, target_uid="", detail=""):
+    now_ts = int(time.time())
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    cur.execute(
+        f"""
+        INSERT INTO admin_logs (action, target_uid, detail, created_ts)
+        VALUES ({p}, {p}, {p}, {p})
+        """,
+        (str(action or "")[:120], str(target_uid or "")[:40], str(detail or "")[:3000], now_ts),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_admin_logs(limit=120):
+    lim = max(1, min(500, int(limit)))
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT id, action, target_uid, detail, created_ts
+        FROM admin_logs
+        ORDER BY id DESC
+        LIMIT {lim}
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        result.append(
+            {
+                "id": int(row[0]),
+                "action": row[1] or "",
+                "target_uid": row[2] or "",
+                "detail": row[3] or "",
+                "created_ts": int(row[4] or 0),
+            }
+        )
+    return result

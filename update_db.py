@@ -44,13 +44,14 @@ def parse_verified_users_file(path):
 
 def load_existing(conn):
     cur = conn.cursor()
-    cur.execute("SELECT user_id, username, status, first_seen_ts, bought_tag FROM users")
+    cur.execute("SELECT user_id, username, status, first_seen_ts, bought_tag, manual_add FROM users")
     return {
         row[0]: {
             "username": row[1],
             "status": row[2],
             "first_seen_ts": int(row[3]),
             "bought_tag": int(row[4]),
+            "manual_add": int(row[5]),
         }
         for row in cur.fetchall()
     }
@@ -82,13 +83,14 @@ def sync_database(parsed_rows):
         p = "%s" if IS_POSTGRES else "?"
         upsert_sql = (
             f"""
-            INSERT INTO users (user_id, username, status, first_seen_ts, bought_tag)
-            VALUES ({p}, {p}, {p}, {p}, {p})
+            INSERT INTO users (user_id, username, status, first_seen_ts, bought_tag, manual_add)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p})
             ON CONFLICT(user_id) DO UPDATE SET
                 username=excluded.username,
                 status=excluded.status,
                 first_seen_ts=excluded.first_seen_ts,
-                bought_tag=excluded.bought_tag
+                bought_tag=excluded.bought_tag,
+                manual_add=excluded.manual_add
             """
         )
 
@@ -97,9 +99,10 @@ def sync_database(parsed_rows):
 
             first_seen = old["first_seen_ts"] if old else now_ts
             bought_tag = old["bought_tag"] if old else 0
+            manual_add = old["manual_add"] if old else 0
             status = determine_status(row["raw_source"], old, now_ts)
 
-            cur.execute(upsert_sql, (user_id, row["username"], status, int(first_seen), int(bought_tag)))
+            cur.execute(upsert_sql, (user_id, row["username"], status, int(first_seen), int(bought_tag), int(manual_add)))
 
         # Do not hard-delete users missing from a single collector snapshot.
         # This avoids accidental drops/reclassification caused by transient API misses.

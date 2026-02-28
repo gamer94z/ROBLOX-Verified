@@ -5,16 +5,21 @@
 <title>Gamers Network | Admin Panel</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="main-app dark-mode admin-console">
+<body class="main-app admin-console">
 <header>
     <h1>Gamers Network</h1>
     <p>Operator Control Console</p>
 </header>
-<a class="admin-corner-btn" href="{{ url_for('home') }}" title="Home" aria-label="Open Home">
+<a class="admin-corner-btn home-corner-btn" href="{{ url_for('home') }}" title="Home" aria-label="Open Home">
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
         <path d="M12 3l9 8h-2v9h-5v-6H10v6H5v-9H3l9-8z" fill="currentColor"/>
     </svg>
 </a>
+<button class="admin-corner-btn" id="cornerSettingsBtn" title="Settings" aria-label="Open Settings" type="button">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.13-.54 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z" fill="currentColor"/>
+    </svg>
+</button>
 
 <main class="admin-main">
     <section class="panel admin-toolbar">
@@ -53,6 +58,31 @@
         </div>
     </section>
 
+    <section class="panel admin-manual">
+        <div class="admin-evidence-head">
+            <h3>Manual User Manager</h3>
+            <p>Add or remove users directly from the database. Manually added users are tagged as Manual Add site-wide.</p>
+        </div>
+        <div class="admin-evidence-form">
+            <label>User ID</label>
+            <input id="manualUid" type="text" placeholder="Roblox user id">
+            <label>Status</label>
+            <select id="manualStatus">
+                <option value="Newly Added">Newly Added</option>
+                <option value="Seed List">Seed List</option>
+            </select>
+            <label>Bought Tag</label>
+            <select id="manualBought">
+                <option value="0">No</option>
+                <option value="1">Yes</option>
+            </select>
+        </div>
+        <div class="admin-evidence-actions">
+            <button id="manualAddBtn" type="button">Add User</button>
+            <button id="manualRemoveBtn" type="button" class="danger">Remove User</button>
+        </div>
+    </section>
+
     <section class="panel admin-table-wrap">
         <div class="admin-table-scroll">
             <table class="admin-table">
@@ -62,7 +92,7 @@
                         <th>User ID</th>
                         <th>Status</th>
                         <th>Bought Check</th>
-                        <th>Action</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -84,12 +114,42 @@
                                 type="button">
                                 {{ "Remove Tag" if info.bought_tag else "Mark Bought" }}
                             </button>
+                            <button class="manage-evidence-btn" data-uid="{{ uid }}" data-username="{{ info.username }}" type="button">Evidence</button>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+    </section>
+
+    <section class="panel admin-evidence">
+        <div class="admin-evidence-head">
+            <h3>Evidence Manager</h3>
+            <p>Attach links or notes to bought-check profiles. You can add multiple entries and edit/remove each one.</p>
+        </div>
+        <div class="admin-evidence-form">
+            <label>User ID</label>
+            <input id="evidenceUid" type="text" placeholder="Roblox user id">
+            <label>Evidence Type</label>
+            <select id="evidenceType">
+                <option value="google_doc">Google Doc</option>
+                <option value="group_link">Group Link</option>
+                <option value="other">Other</option>
+            </select>
+            <label>Title</label>
+            <input id="evidenceTitleInput" type="text" placeholder="Short evidence title">
+            <label>Link</label>
+            <input id="evidenceUrl" type="url" placeholder="https://...">
+            <label>Notes</label>
+            <textarea id="evidenceNote" rows="4" placeholder="Add context, versions, or explanations..."></textarea>
+        </div>
+        <div class="admin-evidence-actions">
+            <button id="evidenceAddBtn" type="button">Add Evidence</button>
+            <button id="evidenceReloadBtn" type="button">Reload List</button>
+            <button id="evidenceDeleteAllBtn" type="button" class="danger">Delete All For User</button>
+        </div>
+        <div id="evidenceList" class="admin-evidence-list"></div>
     </section>
 
     <section class="pagination panel admin-pagination">
@@ -101,22 +161,101 @@
         <a href="?page={{ page+1 }}&query={{ query }}&bought_filter={{ bought_filter }}">Next</a>
         {% endif %}
     </section>
+
+    <section class="panel admin-logs">
+        <div class="admin-evidence-head">
+            <h3>Admin Action Logs</h3>
+            <p>Track manual adds/removals, tag updates, and evidence operations.</p>
+        </div>
+        <div class="admin-evidence-actions">
+            <button id="reloadAdminLogsBtn" type="button">Reload Logs</button>
+        </div>
+        <div id="adminLogsList" class="admin-evidence-list">
+            {% if admin_logs %}
+                {% for l in admin_logs %}
+                <div class="ev-item">
+                    <div class="ev-head">
+                        <span>{{ l.action }}</span>
+                        <span>{{ l.created_ts }}</span>
+                    </div>
+                    <div><strong>UID:</strong> {{ l.target_uid if l.target_uid else "-" }}</div>
+                    <div class="note">{{ l.detail }}</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="ev-empty">No admin actions logged yet.</div>
+            {% endif %}
+        </div>
+    </section>
 </main>
 
+<footer class="site-footer">
+    <p>Gamers Network &copy; 2026</p>
+    <p class="site-disclaimer">Disclaimer: all data shown is publicly available from Roblox APIs and the Roblox website.</p>
+</footer>
+
+<div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-header">Control Center <span id="closeSettings">&times;</span></div>
+    <div class="settings-body">
+        <div class="settings-group">
+            <p class="settings-label">Theme</p>
+            <div class="settings-row">
+                <button id="lightModeBtn" class="settings-btn" type="button">Light</button>
+                <button id="darkModeBtn" class="settings-btn" type="button">Dark</button>
+            </div>
+        </div>
+        <button id="resetSettingsBtn" class="settings-reset" type="button">Reset Theme</button>
+    </div>
+</div>
+
 <script>
-const statusBar = document.createElement("div");
-statusBar.className = "admin-status";
-document.body.appendChild(statusBar);
-let statusHideTimer = null;
+(function () {
+    const body = document.body;
+    const settingsModal = document.getElementById("settings-modal");
+    const cornerSettingsBtn = document.getElementById("cornerSettingsBtn");
+    const closeSettings = document.getElementById("closeSettings");
+    const darkModeBtn = document.getElementById("darkModeBtn");
+    const lightModeBtn = document.getElementById("lightModeBtn");
+    const resetSettingsBtn = document.getElementById("resetSettingsBtn");
+    const storedTheme = localStorage.getItem("theme");
+
+    if (storedTheme === "dark" || storedTheme === "light") {
+        body.classList.toggle("dark-mode", storedTheme === "dark");
+    }
+
+    cornerSettingsBtn?.addEventListener("click", () => settingsModal?.classList.toggle("hidden"));
+    closeSettings?.addEventListener("click", () => settingsModal?.classList.add("hidden"));
+
+    darkModeBtn?.addEventListener("click", () => {
+        body.classList.add("dark-mode");
+        localStorage.setItem("theme", "dark");
+    });
+    lightModeBtn?.addEventListener("click", () => {
+        body.classList.remove("dark-mode");
+        localStorage.setItem("theme", "light");
+    });
+    resetSettingsBtn?.addEventListener("click", () => {
+        body.classList.remove("dark-mode");
+        localStorage.setItem("theme", "light");
+    });
+})();
+
+const toastWrap = document.createElement("div");
+toastWrap.className = "admin-toast-wrap";
+document.body.appendChild(toastWrap);
 
 function setStatus(text, type = "info") {
-    statusBar.innerText = text;
-    statusBar.dataset.type = type;
-    statusBar.classList.add("show");
-    if (statusHideTimer) clearTimeout(statusHideTimer);
-    statusHideTimer = setTimeout(() => {
-        statusBar.classList.remove("show");
-    }, 2400);
+    const toast = document.createElement("div");
+    toast.className = "admin-toast";
+    toast.dataset.type = type;
+    toast.innerText = text;
+    toastWrap.appendChild(toast);
+
+    requestAnimationFrame(() => toast.classList.add("show"));
+    setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.remove(), 260);
+    }, 2600);
 }
 
 document.querySelectorAll(".toggle-bought-btn").forEach(btn => {
@@ -150,6 +289,242 @@ document.querySelectorAll(".toggle-bought-btn").forEach(btn => {
         }
     });
 });
+
+const evidenceUid = document.getElementById("evidenceUid");
+const evidenceType = document.getElementById("evidenceType");
+const evidenceTitleInput = document.getElementById("evidenceTitleInput");
+const evidenceUrl = document.getElementById("evidenceUrl");
+const evidenceNote = document.getElementById("evidenceNote");
+const evidenceList = document.getElementById("evidenceList");
+const evidenceAddBtn = document.getElementById("evidenceAddBtn");
+const evidenceReloadBtn = document.getElementById("evidenceReloadBtn");
+const evidenceDeleteAllBtn = document.getElementById("evidenceDeleteAllBtn");
+const manualUid = document.getElementById("manualUid");
+const manualStatus = document.getElementById("manualStatus");
+const manualBought = document.getElementById("manualBought");
+const manualAddBtn = document.getElementById("manualAddBtn");
+const manualRemoveBtn = document.getElementById("manualRemoveBtn");
+const adminLogsList = document.getElementById("adminLogsList");
+const reloadAdminLogsBtn = document.getElementById("reloadAdminLogsBtn");
+
+function renderEvidenceItems(items) {
+    evidenceList.innerHTML = "";
+    if (!items?.length) {
+        evidenceList.innerHTML = `<div class="ev-empty">No evidence for this user yet.</div>`;
+        return;
+    }
+    items.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "ev-item";
+        const when = item.updated_ts ? new Date(item.updated_ts * 1000).toLocaleString() : "Unknown";
+        const currentType = (item.source_type || "other").toLowerCase();
+        const typeSelect = `
+            <select class="ev-type" data-id="${item.id}">
+                <option value="google_doc" ${currentType === "google_doc" ? "selected" : ""}>Google Doc</option>
+                <option value="group_link" ${currentType === "group_link" ? "selected" : ""}>Group Link</option>
+                <option value="other" ${currentType === "other" ? "selected" : ""}>Other</option>
+            </select>
+        `;
+        row.innerHTML = `
+            <div class="ev-head">
+                <span>Type</span>
+                <span>${when}</span>
+            </div>
+            ${typeSelect}
+            <input class="ev-title" data-id="${item.id}" value="${(item.title || "").replace(/"/g, "&quot;")}">
+            <input class="ev-url" data-id="${item.id}" value="${(item.url || "").replace(/"/g, "&quot;")}">
+            <textarea class="ev-note" data-id="${item.id}" rows="3">${item.note || ""}</textarea>
+            <div class="ev-actions">
+                <button class="ev-save" data-id="${item.id}" type="button">Save</button>
+                <button class="ev-delete danger" data-id="${item.id}" type="button">Delete</button>
+            </div>
+        `;
+        evidenceList.appendChild(row);
+    });
+}
+
+async function loadEvidenceForCurrent() {
+    const uid = evidenceUid.value.trim();
+    if (!uid) {
+        setStatus("Set a user id first.", "error");
+        return;
+    }
+    try {
+        const res = await fetch(`/api/admin/evidence/${uid}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load evidence");
+        renderEvidenceItems(data.items || []);
+    } catch (e) {
+        setStatus(e.message || "Failed to load evidence", "error");
+    }
+}
+
+evidenceAddBtn?.addEventListener("click", async () => {
+    const uid = evidenceUid.value.trim();
+    if (!uid) return setStatus("User id is required.", "error");
+    try {
+        const res = await fetch("/api/admin/evidence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                uid,
+                source_type: evidenceType.value,
+                title: evidenceTitleInput.value,
+                url: evidenceUrl.value,
+                note: evidenceNote.value,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Add failed");
+        evidenceTitleInput.value = "";
+        evidenceUrl.value = "";
+        evidenceNote.value = "";
+        await loadEvidenceForCurrent();
+        await loadAdminLogs();
+        setStatus("Evidence added.", "ok");
+    } catch (e) {
+        setStatus(e.message || "Failed to add evidence", "error");
+    }
+});
+
+evidenceReloadBtn?.addEventListener("click", loadEvidenceForCurrent);
+
+evidenceDeleteAllBtn?.addEventListener("click", async () => {
+    const uid = evidenceUid.value.trim();
+    if (!uid) return setStatus("User id is required.", "error");
+    if (!confirm(`Delete all evidence for ${uid}?`)) return;
+    try {
+        const res = await fetch(`/api/admin/evidence/user/${uid}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Delete failed");
+        await loadEvidenceForCurrent();
+        setStatus(`Deleted ${data.deleted || 0} evidence items.`, "ok");
+    } catch (e) {
+        setStatus(e.message || "Failed to delete evidence", "error");
+    }
+});
+
+evidenceList?.addEventListener("click", async (evt) => {
+    const btn = evt.target.closest("button");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (!id) return;
+    const row = btn.closest(".ev-item");
+    const source = row?.querySelector(".ev-type")?.value || "other";
+    const title = row?.querySelector(".ev-title")?.value || "";
+    const url = row?.querySelector(".ev-url")?.value || "";
+    const note = row?.querySelector(".ev-note")?.value || "";
+
+    if (btn.classList.contains("ev-save")) {
+        try {
+            const res = await fetch(`/api/admin/evidence/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ source_type: source, title, url, note }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || "Save failed");
+            setStatus("Evidence updated.", "ok");
+            await loadEvidenceForCurrent();
+            await loadAdminLogs();
+        } catch (e) {
+            setStatus(e.message || "Failed to save", "error");
+        }
+    }
+    if (btn.classList.contains("ev-delete")) {
+        if (!confirm("Delete this evidence item?")) return;
+        try {
+            const res = await fetch(`/api/admin/evidence/${id}`, { method: "DELETE" });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || "Delete failed");
+            setStatus("Evidence removed.", "ok");
+            await loadEvidenceForCurrent();
+            await loadAdminLogs();
+        } catch (e) {
+            setStatus(e.message || "Failed to delete", "error");
+        }
+    }
+});
+
+document.querySelectorAll(".manage-evidence-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+        evidenceUid.value = btn.dataset.uid || "";
+        await loadEvidenceForCurrent();
+        setStatus(`Loaded evidence for ${btn.dataset.username || btn.dataset.uid}.`, "info");
+        window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    });
+});
+
+async function loadAdminLogs() {
+    try {
+        const res = await fetch("/api/admin/logs?limit=120", { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load logs");
+        const items = data.items || [];
+        adminLogsList.innerHTML = "";
+        if (!items.length) {
+            adminLogsList.innerHTML = `<div class="ev-empty">No admin actions logged yet.</div>`;
+            return;
+        }
+        items.forEach(l => {
+            const box = document.createElement("div");
+            box.className = "ev-item";
+            const when = l.created_ts ? new Date(l.created_ts * 1000).toLocaleString() : "Unknown";
+            box.innerHTML = `
+                <div class="ev-head"><span>${l.action}</span><span>${when}</span></div>
+                <div><strong>UID:</strong> ${l.target_uid || "-"}</div>
+                <div class="note">${l.detail || ""}</div>
+            `;
+            adminLogsList.appendChild(box);
+        });
+    } catch (e) {
+        setStatus(e.message || "Failed to load logs", "error");
+    }
+}
+
+manualAddBtn?.addEventListener("click", async () => {
+    const uid = manualUid.value.trim();
+    if (!uid) return setStatus("User id is required.", "error");
+    try {
+        const res = await fetch("/api/admin/manual_user_add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                uid,
+                status: manualStatus.value,
+                bought_tag: manualBought.value === "1",
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Failed to add user");
+        setStatus(`Added ${data.username} (${data.uid}).`, "ok");
+        await loadAdminLogs();
+    } catch (e) {
+        setStatus(e.message || "Failed to add user", "error");
+    }
+});
+
+manualRemoveBtn?.addEventListener("click", async () => {
+    const uid = manualUid.value.trim();
+    if (!uid) return setStatus("User id is required.", "error");
+    if (!confirm(`Remove user ${uid} from database?`)) return;
+    try {
+        const res = await fetch("/api/admin/manual_user_remove", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Failed to remove user");
+        setStatus(`Removed ${data.uid} from database.`, "ok");
+        await loadAdminLogs();
+    } catch (e) {
+        setStatus(e.message || "Failed to remove user", "error");
+    }
+});
+
+reloadAdminLogsBtn?.addEventListener("click", loadAdminLogs);
+loadAdminLogs();
 </script>
 </body>
 </html>
