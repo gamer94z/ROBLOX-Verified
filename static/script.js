@@ -1367,7 +1367,8 @@ async function pollLiveStatus() {
         }
         if (auditDetailEl) {
             const statusText = archiveScan.status || "Profiles that lose Roblox verification are automatically archived.";
-            auditDetailEl.innerText = `${statusText}. Last pass ${archiveLastText}.`;
+            const cleanStatusText = String(statusText).replace(/[.\s]+$/, "");
+            auditDetailEl.innerText = `${cleanStatusText}. Last pass ${archiveLastText}.`;
         }
 
         if (lastDbMtime !== null && status.db_mtime !== lastDbMtime) {

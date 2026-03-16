@@ -794,6 +794,64 @@ def verify_badges_batch(user_ids, progress_stage=None, progress_detail=None):
     return verified
 
 
+def audit_archive_candidates(user_ids):
+    verified = set()
+    audited = set()
+    total = len(user_ids)
+    auto_sync_state["archive_scan_running"] = total > 0
+    auto_sync_state["archive_scan_checked"] = 0
+    auto_sync_state["archive_scan_total"] = total
+    auto_sync_state["archive_scan_removed"] = 0
+    auto_sync_state["archive_scan_status"] = (
+        "Checking active verified profiles for lost verification"
+        if total > 0
+        else "No active profiles available for archive audit"
+    )
+    persist_auto_sync_state(force=True)
+
+    if not total:
+        auto_sync_state["archive_scan_last_ts"] = int(time.time())
+        auto_sync_state["archive_scan_running"] = False
+        persist_auto_sync_state(force=True)
+        return verified, audited
+
+    set_collector_stage(
+        "Stage 6: Archive Audit",
+        f"Rechecking {total} active verified profiles",
+        progress_done=0,
+        progress_total=total,
+        eta_seconds=0,
+    )
+
+    batch_start_ts = time.time()
+    for i in range(0, total, AUTO_SYNC_VERIFY_BATCH_SIZE):
+        batch = user_ids[i:i + AUTO_SYNC_VERIFY_BATCH_SIZE]
+        r = safe_post(BASE_USERS, {"userIds": batch})
+        if r and r.status_code == 200:
+            audited.update(str(uid) for uid in batch)
+            for user in r.json().get("data", []):
+                if bool(user.get("hasVerifiedBadge")):
+                    verified.add(str(user.get("id")))
+        else:
+            auto_sync_state["archive_scan_status"] = "Archive audit skipped some profiles due to API issues"
+
+        processed = min(i + AUTO_SYNC_VERIFY_BATCH_SIZE, total)
+        remaining = max(0, total - processed)
+        elapsed = max(0.001, time.time() - batch_start_ts)
+        avg_per_user = elapsed / max(1, processed)
+        eta_seconds = int(remaining * avg_per_user)
+        auto_sync_state["archive_scan_checked"] = processed
+        auto_sync_state["archive_scan_status"] = f"Checked {processed} of {total} active profiles"
+        update_collector_progress(processed, total, eta_seconds=eta_seconds)
+        persist_auto_sync_state(force=True)
+        time.sleep(AUTO_SYNC_BATCH_DELAY)
+
+    auto_sync_state["archive_scan_running"] = False
+    auto_sync_state["archive_scan_last_ts"] = int(time.time())
+    persist_auto_sync_state(force=True)
+    return verified, audited
+
+
 def scan_group(group_id, group_name, verified_users, frontier_candidates, group_index=None, group_total=None):
     app_logger.info("Collector scanning group: %s (%s)", group_name, group_id)
     cursor = None
@@ -1063,38 +1121,40 @@ def run_auto_sync_cycle():
             parsed[uid_str] = {"username": info["username"], "raw_source": info["source"]}
             added += 1
 
-    # Remove archived users from the active collector snapshot file and move
-    # active users that lost verification into the historical archive bucket.
-    active_existing_ids = {
-        str(uid)
-        for uid, info in existing_db.items()
-        if str(uid).isdigit() and is_active_verified_user(info) and str(uid) != str(DEV_UID)
-    }
-    auto_sync_state["archive_scan_running"] = True
-    auto_sync_state["archive_scan_checked"] = 0
-    auto_sync_state["archive_scan_total"] = len(active_existing_ids)
-    auto_sync_state["archive_scan_removed"] = 0
-    auto_sync_state["archive_scan_status"] = "Checking active verified profiles for lost verification"
-    persist_auto_sync_state(force=False)
-    active_verified_ids = {str(uid) for uid in verified_users.keys()}
-    lost_verification_ids = sorted(active_existing_ids - active_verified_ids, key=lambda x: int(x))
-    auto_sync_state["archive_scan_checked"] = len(active_existing_ids)
-    auto_sync_state["archive_scan_status"] = f"Checked {len(active_existing_ids)} active profiles"
-    for uid in lost_verification_ids:
-        parsed.pop(uid, None)
-
     write_verified_users_file(parsed)
     update_collector_progress(1, 2, eta_seconds=2)
     sync_database(parsed)
+
+    # Perform a real archive audit against the active verified database so
+    # users are only moved when they actually no longer have the Roblox badge.
+    current_db = get_all_users()
+    active_existing_ids = sorted(
+        [
+            str(uid)
+            for uid, info in current_db.items()
+            if str(uid).isdigit() and is_active_verified_user(info) and str(uid) != str(DEV_UID)
+        ],
+        key=lambda x: int(x),
+    )
+    still_verified_ids, audited_archive_ids = audit_archive_candidates([int(uid) for uid in active_existing_ids])
+    lost_verification_ids = sorted(
+        [uid for uid in active_existing_ids if uid in audited_archive_ids and uid not in still_verified_ids],
+        key=lambda x: int(x),
+    )
     archived_count = archive_formerly_verified(lost_verification_ids, protected_uids=[DEV_UID])
-    auto_sync_state["archive_scan_running"] = False
+    for uid in lost_verification_ids:
+        parsed.pop(str(uid), None)
+    write_verified_users_file(parsed)
     auto_sync_state["archive_scan_removed"] = int(archived_count)
-    auto_sync_state["archive_scan_last_ts"] = int(time.time())
     if archived_count > 0:
         auto_sync_state["archive_scan_status"] = f"Archived {archived_count} users who lost verification"
+    elif len(audited_archive_ids) < len(active_existing_ids):
+        auto_sync_state["archive_scan_status"] = (
+            f"Archive audit incomplete: checked {len(audited_archive_ids)} of {len(active_existing_ids)} profiles"
+        )
     else:
         auto_sync_state["archive_scan_status"] = "No users lost verification this pass"
-    persist_auto_sync_state(force=False)
+    persist_auto_sync_state(force=True)
     if archived_count > 0:
         log_monitor_event(
             "warn",
