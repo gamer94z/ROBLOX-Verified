@@ -7,6 +7,7 @@ const userDataCache = {};
 let currentControllers = {};
 let lastDbMtime = null;
 let liveStatusPollHandle = null;
+let liveStatusPollMs = 0;
 let batchLoadRunId = 0;
 const AVATAR_PLACEHOLDER = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%230f172a'/%3E%3Cstop offset='1' stop-color='%231e3a8a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='120' height='120' rx='60' fill='url(%23g)'/%3E%3Ccircle cx='60' cy='46' r='22' fill='%2393c5fd' fill-opacity='0.9'/%3E%3Cpath d='M24 103c6-17 20-28 36-28s30 11 36 28' fill='%2393c5fd' fill-opacity='0.9'/%3E%3C/svg%3E";
 const evidenceOverlay = document.getElementById("evidenceOverlay");
@@ -1340,6 +1341,9 @@ async function pollLiveStatus() {
         const archiveLastText = archiveScan.last_ts
             ? new Date(Number(archiveScan.last_ts) * 1000).toLocaleTimeString()
             : "awaiting first scan";
+        const archiveNextText = archiveScan.next_run_ts
+            ? new Date(Number(archiveScan.next_run_ts) * 1000).toLocaleTimeString()
+            : "";
 
         if (modeEl) modeEl.innerText = status.database_mode;
         if (updatedEl) updatedEl.innerText = `Last DB update: ${status.db_updated_at}`;
@@ -1348,14 +1352,16 @@ async function pollLiveStatus() {
         }
         if (auditStatusEl) {
             auditStatusEl.innerText = archiveScan.running
-                ? "Archive scanner running"
+                ? "Archive scanner live"
                 : "Archive scanner standing by";
         }
         if (auditCountEl) {
             auditCountEl.innerText = `Formerly Verified: ${status.former_users || 0}`;
         }
         if (auditProgressEl) {
-            auditProgressEl.innerText = archiveTotal > 0
+            auditProgressEl.innerText = archiveScan.running && archiveTotal > 0
+                ? `Scanning live: ${archiveChecked}/${archiveTotal} checked`
+                : archiveTotal > 0
                 ? `Last pass: ${archiveChecked}/${archiveTotal} checked`
                 : "Last pass: awaiting first scan";
         }
@@ -1368,8 +1374,14 @@ async function pollLiveStatus() {
         if (auditDetailEl) {
             const statusText = archiveScan.status || "Profiles that lose Roblox verification are automatically archived.";
             const cleanStatusText = String(statusText).replace(/[.\s]+$/, "");
-            auditDetailEl.innerText = `${cleanStatusText}. Last pass ${archiveLastText}.`;
+            auditDetailEl.innerText = archiveScan.running
+                ? `${cleanStatusText}. Updating live now.`
+                : archiveNextText
+                ? `${cleanStatusText}. Last pass ${archiveLastText}. Next audit ${archiveNextText}.`
+                : `${cleanStatusText}. Last pass ${archiveLastText}.`;
         }
+
+        updateLiveStatusPollingSpeed(Boolean(archiveScan.running));
 
         if (lastDbMtime !== null && status.db_mtime !== lastDbMtime) {
             if (!window.__DEV_PAUSE_AUTO_REFRESH) {
@@ -1387,13 +1399,20 @@ async function pollLiveStatus() {
     }
 }
 
-function startLiveStatusPolling() {
+function updateLiveStatusPollingSpeed(archiveRunning) {
+    const desiredMs = archiveRunning ? 1500 : appSettings.refreshIntervalMs;
+    if (liveStatusPollMs === desiredMs) return;
+    startLiveStatusPolling(desiredMs);
+}
+
+function startLiveStatusPolling(intervalMs) {
     if (liveStatusPollHandle) clearInterval(liveStatusPollHandle);
+    liveStatusPollMs = intervalMs || appSettings.refreshIntervalMs;
     pollLiveStatus();
     liveStatusPollHandle = setInterval(() => {
         pollLiveStatus();
         tryRunDeferredReload();
-    }, appSettings.refreshIntervalMs);
+    }, liveStatusPollMs);
 }
 
 startLiveStatusPolling();

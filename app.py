@@ -61,6 +61,10 @@ AUTO_SYNC_ENABLED = os.environ.get("AUTO_SYNC_ENABLED", "1") == "1"
 AUTO_SYNC_INTERVAL_SECONDS = max(
     60, int(os.environ.get("AUTO_SYNC_INTERVAL_SECONDS", "600"))
 )
+AUTO_ARCHIVE_AUDIT_ENABLED = os.environ.get("AUTO_ARCHIVE_AUDIT_ENABLED", "1") == "1"
+AUTO_ARCHIVE_AUDIT_INTERVAL_SECONDS = max(
+    300, int(os.environ.get("AUTO_ARCHIVE_AUDIT_INTERVAL_SECONDS", str(7 * 24 * 60 * 60)))
+)
 AUTO_SYNC_SEED_LIMIT = max(10, int(os.environ.get("AUTO_SYNC_SEED_LIMIT", "120")))
 AUTO_SYNC_VERIFY_BATCH_SIZE = max(
     20, min(100, int(os.environ.get("AUTO_SYNC_VERIFY_BATCH_SIZE", "100")))
@@ -163,6 +167,7 @@ auto_sync_state = {
     "archive_scan_removed": 0,
     "archive_scan_last_ts": None,
     "archive_scan_status": "",
+    "archive_scan_next_run_ts": None,
     "cycle_history": [],
     "api_limit_total": 0,
     "api_limit_hit_timestamps": [],
@@ -189,8 +194,10 @@ auto_sync_state = {
     },
 }
 auto_sync_thread_started = False
+archive_audit_thread_started = False
 bootstrap_sync_done = False
 last_state_persist_ts = 0.0
+archive_audit_lock = threading.Lock()
 presence_lock = threading.Lock()
 client_presence = {}
 allowed_dev_targets = {"all", "home", "index", "database", "monitor", "api_status", "changelog"}
@@ -230,6 +237,7 @@ PERSISTED_SYNC_KEYS = (
     "archive_scan_removed",
     "archive_scan_last_ts",
     "archive_scan_status",
+    "archive_scan_next_run_ts",
     "cycle_history",
     "api_limit_total",
     "api_limit_hit_timestamps",
@@ -815,14 +823,6 @@ def audit_archive_candidates(user_ids):
         persist_auto_sync_state(force=True)
         return verified, audited
 
-    set_collector_stage(
-        "Stage 6: Archive Audit",
-        f"Rechecking {total} active verified profiles",
-        progress_done=0,
-        progress_total=total,
-        eta_seconds=0,
-    )
-
     batch_start_ts = time.time()
     for i in range(0, total, AUTO_SYNC_VERIFY_BATCH_SIZE):
         batch = user_ids[i:i + AUTO_SYNC_VERIFY_BATCH_SIZE]
@@ -839,10 +839,9 @@ def audit_archive_candidates(user_ids):
         remaining = max(0, total - processed)
         elapsed = max(0.001, time.time() - batch_start_ts)
         avg_per_user = elapsed / max(1, processed)
-        eta_seconds = int(remaining * avg_per_user)
+        _eta_seconds = int(remaining * avg_per_user)
         auto_sync_state["archive_scan_checked"] = processed
         auto_sync_state["archive_scan_status"] = f"Checked {processed} of {total} active profiles"
-        update_collector_progress(processed, total, eta_seconds=eta_seconds)
         persist_auto_sync_state(force=True)
         time.sleep(AUTO_SYNC_BATCH_DELAY)
 
@@ -850,6 +849,59 @@ def audit_archive_candidates(user_ids):
     auto_sync_state["archive_scan_last_ts"] = int(time.time())
     persist_auto_sync_state(force=True)
     return verified, audited
+
+
+def perform_archive_audit():
+    if not archive_audit_lock.acquire(blocking=False):
+        return 0
+
+    try:
+        current_db = get_all_users()
+        active_existing_ids = sorted(
+            [
+                str(uid)
+                for uid, info in current_db.items()
+                if str(uid).isdigit() and is_active_verified_user(info) and str(uid) != str(DEV_UID)
+            ],
+            key=lambda x: int(x),
+        )
+        still_verified_ids, audited_archive_ids = audit_archive_candidates([int(uid) for uid in active_existing_ids])
+        lost_verification_ids = sorted(
+            [uid for uid in active_existing_ids if uid in audited_archive_ids and uid not in still_verified_ids],
+            key=lambda x: int(x),
+        )
+
+        archived_count = archive_formerly_verified(lost_verification_ids, protected_uids=[DEV_UID])
+        write_verified_users_file(load_parsed_from_db_snapshot())
+        auto_sync_state["archive_scan_removed"] = int(archived_count)
+        auto_sync_state["archive_scan_next_run_ts"] = int(time.time()) + AUTO_ARCHIVE_AUDIT_INTERVAL_SECONDS
+        if archived_count > 0:
+            auto_sync_state["archive_scan_status"] = f"Archived {archived_count} users who lost verification"
+        elif len(audited_archive_ids) < len(active_existing_ids):
+            auto_sync_state["archive_scan_status"] = (
+                f"Archive audit incomplete: checked {len(audited_archive_ids)} of {len(active_existing_ids)} profiles"
+            )
+        else:
+            auto_sync_state["archive_scan_status"] = "No users lost verification this pass"
+        persist_auto_sync_state(force=True)
+
+        if archived_count > 0:
+            log_monitor_event(
+                "warn",
+                "Users moved to Formerly Verified",
+                {"count": archived_count, "uids": lost_verification_ids[:20]},
+            )
+        else:
+            log_monitor_event(
+                "ok",
+                "Archive audit finished",
+                {"checked": len(audited_archive_ids), "removed": archived_count},
+            )
+        return archived_count
+    finally:
+        auto_sync_state["archive_scan_running"] = False
+        persist_auto_sync_state(force=True)
+        archive_audit_lock.release()
 
 
 def scan_group(group_id, group_name, verified_users, frontier_candidates, group_index=None, group_total=None):
@@ -1124,43 +1176,6 @@ def run_auto_sync_cycle():
     write_verified_users_file(parsed)
     update_collector_progress(1, 2, eta_seconds=2)
     sync_database(parsed)
-
-    # Perform a real archive audit against the active verified database so
-    # users are only moved when they actually no longer have the Roblox badge.
-    current_db = get_all_users()
-    active_existing_ids = sorted(
-        [
-            str(uid)
-            for uid, info in current_db.items()
-            if str(uid).isdigit() and is_active_verified_user(info) and str(uid) != str(DEV_UID)
-        ],
-        key=lambda x: int(x),
-    )
-    still_verified_ids, audited_archive_ids = audit_archive_candidates([int(uid) for uid in active_existing_ids])
-    lost_verification_ids = sorted(
-        [uid for uid in active_existing_ids if uid in audited_archive_ids and uid not in still_verified_ids],
-        key=lambda x: int(x),
-    )
-    archived_count = archive_formerly_verified(lost_verification_ids, protected_uids=[DEV_UID])
-    for uid in lost_verification_ids:
-        parsed.pop(str(uid), None)
-    write_verified_users_file(parsed)
-    auto_sync_state["archive_scan_removed"] = int(archived_count)
-    if archived_count > 0:
-        auto_sync_state["archive_scan_status"] = f"Archived {archived_count} users who lost verification"
-    elif len(audited_archive_ids) < len(active_existing_ids):
-        auto_sync_state["archive_scan_status"] = (
-            f"Archive audit incomplete: checked {len(audited_archive_ids)} of {len(active_existing_ids)} profiles"
-        )
-    else:
-        auto_sync_state["archive_scan_status"] = "No users lost verification this pass"
-    persist_auto_sync_state(force=True)
-    if archived_count > 0:
-        log_monitor_event(
-            "warn",
-            "Users moved to Formerly Verified",
-            {"count": archived_count, "uids": lost_verification_ids[:20]},
-        )
     update_collector_progress(2, 2, eta_seconds=0)
     auto_sync_state["last_cycle_seed_verified"] = len(seed_verified)
     auto_sync_state["last_cycle_frontier_checked"] = len(frontier_batch_ids)
@@ -1183,7 +1198,6 @@ def run_auto_sync_cycle():
             "verified_total": len(verified_users),
             "scanned_candidates": scanned_count,
             "new_added": added,
-            "archived_formerly_verified": archived_count,
             "total_snapshot": len(parsed),
         },
     )
@@ -1261,8 +1275,6 @@ def auto_sync_loop():
             persist_auto_sync_state()
         except Exception as exc:
             auto_sync_state["last_error"] = str(exc)
-            auto_sync_state["archive_scan_running"] = False
-            auto_sync_state["archive_scan_status"] = f"Archive scan interrupted: {exc}"
             app_logger.exception("Auto-sync cycle failed")
             cycle_duration = max(0, int(time.time() - cycle_start_monotonic))
             history = list(auto_sync_state.get("cycle_history") or [])
@@ -1311,6 +1323,41 @@ def start_auto_sync_worker():
     worker = threading.Thread(target=auto_sync_loop, name="auto-sync-worker", daemon=True)
     worker.start()
     auto_sync_thread_started = True
+
+
+def archive_audit_loop():
+    app_logger.info(
+        "Archive audit worker started (interval=%ss, enabled=%s)",
+        AUTO_ARCHIVE_AUDIT_INTERVAL_SECONDS,
+        "yes" if AUTO_ARCHIVE_AUDIT_ENABLED else "no",
+    )
+    while True:
+        try:
+            auto_sync_state["archive_scan_next_run_ts"] = None
+            persist_auto_sync_state(force=True)
+            perform_archive_audit()
+        except Exception as exc:
+            auto_sync_state["archive_scan_running"] = False
+            auto_sync_state["archive_scan_last_ts"] = int(time.time())
+            auto_sync_state["archive_scan_status"] = f"Archive audit failed: {exc}"
+            auto_sync_state["archive_scan_next_run_ts"] = int(time.time()) + AUTO_ARCHIVE_AUDIT_INTERVAL_SECONDS
+            persist_auto_sync_state(force=True)
+            app_logger.exception("Archive audit failed")
+        time.sleep(AUTO_ARCHIVE_AUDIT_INTERVAL_SECONDS)
+
+
+def start_archive_audit_worker():
+    global archive_audit_thread_started
+    hydrate_auto_sync_state_from_db()
+    if archive_audit_thread_started or not AUTO_ARCHIVE_AUDIT_ENABLED:
+        return
+
+    if app.debug and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return
+
+    worker = threading.Thread(target=archive_audit_loop, name="archive-audit-worker", daemon=True)
+    worker.start()
+    archive_audit_thread_started = True
 
 
 def is_admin_authenticated():
@@ -2716,15 +2763,17 @@ def live_status():
     former_total = sum(1 for _, u in db.items() if is_formerly_verified_user(u))
     new_total = max(0, total - seed_total)
 
-    if IS_POSTGRES:
-        db_mtime = int(auto_sync_state.get("last_success_ts") or 0)
-        if db_mtime <= 0:
+    collector_data_ts = int(auto_sync_state.get("last_success_ts") or 0)
+    archive_data_ts = int(auto_sync_state.get("archive_scan_last_ts") or 0)
+    db_mtime = max(collector_data_ts, archive_data_ts)
+    if db_mtime <= 0:
+        if IS_POSTGRES:
             db_mtime = int(time.time())
-    else:
-        try:
-            db_mtime = int(os.path.getmtime(DB_NAME))
-        except OSError:
-            db_mtime = int(time.time())
+        else:
+            try:
+                db_mtime = int(os.path.getmtime(DB_NAME))
+            except OSError:
+                db_mtime = int(time.time())
 
     if last_seen_db_mtime is None:
         last_seen_db_mtime = db_mtime
@@ -3074,9 +3123,11 @@ def collector_events():
 
 # Start background worker as soon as app is imported/launched.
 start_auto_sync_worker()
+start_archive_audit_worker()
 
 # ---------------- Run ----------------
 if __name__ == "__main__":
     log_monitor_event("info", "Collector monitor initialized")
     start_auto_sync_worker()
+    start_archive_audit_worker()
     app.run(debug=True)

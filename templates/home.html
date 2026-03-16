@@ -1382,6 +1382,8 @@ footer {
 <script>
 const DEV_UID = "{{ DEV_UID }}";
 let lastDbMtime = null;
+let liveStatusTimer = null;
+let liveStatusIntervalMs = 15000;
 const previousMetricValues = {};
 let recentLoaded = false;
 let recentBoughtLoaded = false;
@@ -1672,6 +1674,7 @@ function updateLiveStatus() {
             const archiveChecked = Number(archiveScan.checked || 0);
             const archiveTotal = Number(archiveScan.total || 0);
             const archiveRemoved = Number(archiveScan.removed || 0);
+            const archiveRunning = Boolean(archiveScan.running);
 
             if (modeEl) modeEl.innerText = status.database_mode;
             if (updatedEl) updatedEl.innerText = `Last DB update: ${status.db_updated_at}`;
@@ -1697,12 +1700,16 @@ function updateLiveStatus() {
             if (noteDbMode) noteDbMode.innerText = status.database_mode || "Unknown";
             if (noteLastSync) noteLastSync.innerText = status.db_updated_at || "Unknown";
             if (noteFormerCount) {
-                if (archiveTotal > 0) {
+                if (archiveRunning && archiveTotal > 0) {
+                    noteFormerCount.innerText = `Scanning live: ${archiveChecked}/${archiveTotal} • ${archiveRemoved} archived`;
+                } else if (archiveTotal > 0) {
                     noteFormerCount.innerText = `${archiveChecked}/${archiveTotal} checked • ${archiveRemoved} archived`;
                 } else {
                     noteFormerCount.innerText = `${Number(status.former_users || 0).toLocaleString()} archived`;
                 }
             }
+
+            setLiveStatusInterval(archiveRunning ? 1500 : 15000);
 
             const total = Number(status.total_users || 0);
             const seed = Number(status.seed_users || 0);
@@ -1721,6 +1728,15 @@ function updateLiveStatus() {
             lastDbMtime = status.db_mtime;
         })
         .catch(() => {});
+}
+
+function setLiveStatusInterval(ms) {
+    if (liveStatusIntervalMs === ms) return;
+    liveStatusIntervalMs = ms;
+    const intervalEl = document.getElementById("telemetryInterval");
+    if (intervalEl) intervalEl.innerText = `${Math.round(liveStatusIntervalMs / 1000)}s`;
+    if (liveStatusTimer) clearInterval(liveStatusTimer);
+    liveStatusTimer = setInterval(updateLiveStatus, liveStatusIntervalMs);
 }
 
 function loadHomeChangelog() {
@@ -1760,7 +1776,7 @@ function bootHomePage() {
     loadHomeChangelog();
     updateLiveStatus();
 
-    setInterval(updateLiveStatus, 15000);
+    liveStatusTimer = setInterval(updateLiveStatus, liveStatusIntervalMs);
     setInterval(loadRecentActivity, 15000);
     setInterval(loadRecentBought, 15000);
     setInterval(loadHomeChangelog, 30000);
