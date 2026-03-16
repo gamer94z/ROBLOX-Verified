@@ -29,10 +29,14 @@ from database import (
     get_evidence_counts,
     add_or_update_manual_user,
     remove_user,
+    archive_formerly_verified,
     add_admin_log,
     get_admin_logs,
     DB_NAME,
     IS_POSTGRES,
+    SEED_STATUS,
+    NEW_STATUS,
+    FORMER_STATUS,
 )
 from update_db import parse_verified_users_file, sync_database, TXT_FILE
 
@@ -153,6 +157,12 @@ auto_sync_state = {
     "group_scan_total_groups": 0,
     "group_member_scanned": 0,
     "group_member_total": 0,
+    "archive_scan_running": False,
+    "archive_scan_checked": 0,
+    "archive_scan_total": 0,
+    "archive_scan_removed": 0,
+    "archive_scan_last_ts": None,
+    "archive_scan_status": "",
     "cycle_history": [],
     "api_limit_total": 0,
     "api_limit_hit_timestamps": [],
@@ -214,6 +224,12 @@ PERSISTED_SYNC_KEYS = (
     "group_scan_total_groups",
     "group_member_scanned",
     "group_member_total",
+    "archive_scan_running",
+    "archive_scan_checked",
+    "archive_scan_total",
+    "archive_scan_removed",
+    "archive_scan_last_ts",
+    "archive_scan_status",
     "cycle_history",
     "api_limit_total",
     "api_limit_hit_timestamps",
@@ -229,6 +245,18 @@ PERSISTED_SYNC_KEYS = (
     "dev_feature_flags",
     "dev_emergency_banner",
 )
+
+
+def is_seed_user(info):
+    return str((info or {}).get("source") or "") == SEED_STATUS
+
+
+def is_formerly_verified_user(info):
+    return str((info or {}).get("source") or "") == FORMER_STATUS
+
+
+def is_active_verified_user(info):
+    return not is_formerly_verified_user(info)
 
 
 def user_sort_key(item):
@@ -645,10 +673,12 @@ def probe_platform_endpoints_cached(ttl_seconds=45):
 def load_parsed_from_db_snapshot():
     parsed = {}
     for uid, info in get_all_users().items():
+        if is_formerly_verified_user(info):
+            continue
         uid_str = str(uid)
         parsed[uid_str] = {
             "username": info.get("username") or uid_str,
-            "raw_source": "Seed List" if info.get("source") == "Seed List" else "Newly Added",
+            "raw_source": SEED_STATUS if is_seed_user(info) else NEW_STATUS,
         }
     return parsed
 
@@ -924,10 +954,14 @@ def run_auto_sync_cycle():
     fallback_seed_ids = [
         int(uid)
         for uid, info in existing_db.items()
-        if str(uid).isdigit() and info.get("source") == "Seed List"
+        if str(uid).isdigit() and is_seed_user(info)
     ]
     if not fallback_seed_ids:
-        fallback_seed_ids = [int(uid) for uid in existing_db.keys() if str(uid).isdigit()]
+        fallback_seed_ids = [
+            int(uid)
+            for uid, info in existing_db.items()
+            if str(uid).isdigit() and is_active_verified_user(info)
+        ]
 
     seed_ids = load_seed_ids() or fallback_seed_ids
     seed_ids = seed_ids[:AUTO_SYNC_SEED_LIMIT]
@@ -1029,9 +1063,44 @@ def run_auto_sync_cycle():
             parsed[uid_str] = {"username": info["username"], "raw_source": info["source"]}
             added += 1
 
+    # Remove archived users from the active collector snapshot file and move
+    # active users that lost verification into the historical archive bucket.
+    active_existing_ids = {
+        str(uid)
+        for uid, info in existing_db.items()
+        if str(uid).isdigit() and is_active_verified_user(info) and str(uid) != str(DEV_UID)
+    }
+    auto_sync_state["archive_scan_running"] = True
+    auto_sync_state["archive_scan_checked"] = 0
+    auto_sync_state["archive_scan_total"] = len(active_existing_ids)
+    auto_sync_state["archive_scan_removed"] = 0
+    auto_sync_state["archive_scan_status"] = "Checking active verified profiles for lost verification"
+    persist_auto_sync_state(force=False)
+    active_verified_ids = {str(uid) for uid in verified_users.keys()}
+    lost_verification_ids = sorted(active_existing_ids - active_verified_ids, key=lambda x: int(x))
+    auto_sync_state["archive_scan_checked"] = len(active_existing_ids)
+    auto_sync_state["archive_scan_status"] = f"Checked {len(active_existing_ids)} active profiles"
+    for uid in lost_verification_ids:
+        parsed.pop(uid, None)
+
     write_verified_users_file(parsed)
     update_collector_progress(1, 2, eta_seconds=2)
     sync_database(parsed)
+    archived_count = archive_formerly_verified(lost_verification_ids, protected_uids=[DEV_UID])
+    auto_sync_state["archive_scan_running"] = False
+    auto_sync_state["archive_scan_removed"] = int(archived_count)
+    auto_sync_state["archive_scan_last_ts"] = int(time.time())
+    if archived_count > 0:
+        auto_sync_state["archive_scan_status"] = f"Archived {archived_count} users who lost verification"
+    else:
+        auto_sync_state["archive_scan_status"] = "No users lost verification this pass"
+    persist_auto_sync_state(force=False)
+    if archived_count > 0:
+        log_monitor_event(
+            "warn",
+            "Users moved to Formerly Verified",
+            {"count": archived_count, "uids": lost_verification_ids[:20]},
+        )
     update_collector_progress(2, 2, eta_seconds=0)
     auto_sync_state["last_cycle_seed_verified"] = len(seed_verified)
     auto_sync_state["last_cycle_frontier_checked"] = len(frontier_batch_ids)
@@ -1054,6 +1123,7 @@ def run_auto_sync_cycle():
             "verified_total": len(verified_users),
             "scanned_candidates": scanned_count,
             "new_added": added,
+            "archived_formerly_verified": archived_count,
             "total_snapshot": len(parsed),
         },
     )
@@ -1131,6 +1201,8 @@ def auto_sync_loop():
             persist_auto_sync_state()
         except Exception as exc:
             auto_sync_state["last_error"] = str(exc)
+            auto_sync_state["archive_scan_running"] = False
+            auto_sync_state["archive_scan_status"] = f"Archive scan interrupted: {exc}"
             app_logger.exception("Auto-sync cycle failed")
             cycle_duration = max(0, int(time.time() - cycle_start_monotonic))
             history = list(auto_sync_state.get("cycle_history") or [])
@@ -2167,16 +2239,22 @@ def index():
         return merged
 
     # ---------------- Filter users ----------------
+    active_db = {uid: info for uid, info in db.items() if is_active_verified_user(info)}
+
     if search_type == "new":
-        filtered = {uid: info for uid, info in db.items() if info["source"] != "Seed List"}
+        filtered = {uid: info for uid, info in active_db.items() if not is_seed_user(info)}
         total_label = f"Total New Users: {len(filtered)}"
 
     elif search_type == "seed":
-        filtered = {uid: info for uid, info in db.items() if info["source"] == "Seed List"}
+        filtered = {uid: info for uid, info in active_db.items() if is_seed_user(info)}
         total_label = f"Total Seed Users: {len(filtered)}"
 
+    elif search_type == "former":
+        filtered = {uid: info for uid, info in db.items() if is_formerly_verified_user(info)}
+        total_label = f"Formerly Verified: {len(filtered)}"
+
     elif search_type == "database":
-        filtered = db
+        filtered = active_db
 
         # --- Database filters ---
         length3 = request.args.get("length3")
@@ -2203,9 +2281,11 @@ def index():
 
         # status/source filtering
         if status_filter == "seed":
-            filtered = {uid: info for uid, info in filtered.items() if info.get("source") == "Seed List"}
+            filtered = {uid: info for uid, info in filtered.items() if is_seed_user(info)}
         elif status_filter == "new":
-            filtered = {uid: info for uid, info in filtered.items() if info.get("source") != "Seed List"}
+            filtered = {uid: info for uid, info in filtered.items() if not is_seed_user(info)}
+        elif status_filter == "former":
+            filtered = {uid: info for uid, info in db.items() if is_formerly_verified_user(info)}
         elif status_filter == "manual":
             filtered = {uid: info for uid, info in filtered.items() if bool(info.get("manual_add"))}
 
@@ -2327,7 +2407,7 @@ def index():
 
     elif search_type == "individual":
         if query:
-            filtered = {uid: info for uid, info in db.items() if query in info["username"].lower()}
+            filtered = {uid: info for uid, info in active_db.items() if query in info["username"].lower()}
         else:
             filtered = {}  # No cards shown by default
         total_label = f"Total Results: {len(filtered)}"
@@ -2356,6 +2436,7 @@ def index():
 @app.route("/database")
 def database_page():
     db = get_all_users()
+    db = {uid: info for uid, info in db.items() if is_active_verified_user(info)}
 
     # Get filters from query string
     length = request.args.get("length", "").strip()
@@ -2508,7 +2589,7 @@ def stars_batch():
 @app.route("/api/recent_activity")
 def recent_activity():
     db = get_all_users()
-    new_users = [(uid, user) for uid, user in db.items() if user.get("source") != "Seed List"]
+    new_users = [(uid, user) for uid, user in db.items() if is_active_verified_user(user) and not is_seed_user(user)]
     # Show truly newest additions based on first-seen timestamp.
     new_users_sorted = sorted(
         new_users,
@@ -2535,7 +2616,7 @@ def recent_activity():
 @app.route("/api/recent_bought")
 def recent_bought():
     db = get_all_users()
-    bought_users = [(uid, user) for uid, user in db.items() if bool(user.get("bought_tag"))]
+    bought_users = [(uid, user) for uid, user in db.items() if is_active_verified_user(user) and bool(user.get("bought_tag"))]
     bought_sorted = sorted(
         bought_users,
         key=lambda x: (int(x[1].get("first_seen_ts") or 0), int(x[0]) if str(x[0]).isdigit() else 0),
@@ -2570,9 +2651,10 @@ def live_status():
         page_key = "all"
     client_id = str(request.args.get("client_id", "")).strip()
     db = get_all_users()
-    total = len(db)
-    seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
-    new_total = total - seed_total
+    total = sum(1 for _, u in db.items() if is_active_verified_user(u))
+    seed_total = sum(1 for _, u in db.items() if is_seed_user(u))
+    former_total = sum(1 for _, u in db.items() if is_formerly_verified_user(u))
+    new_total = max(0, total - seed_total)
 
     if IS_POSTGRES:
         db_mtime = int(auto_sync_state.get("last_success_ts") or 0)
@@ -2603,6 +2685,15 @@ def live_status():
             "total_users": total,
             "seed_users": seed_total,
             "new_users": new_total,
+            "former_users": former_total,
+            "archive_scan": {
+                "running": bool(auto_sync_state.get("archive_scan_running")),
+                "checked": int(auto_sync_state.get("archive_scan_checked") or 0),
+                "total": int(auto_sync_state.get("archive_scan_total") or 0),
+                "removed": int(auto_sync_state.get("archive_scan_removed") or 0),
+                "last_ts": int(auto_sync_state.get("archive_scan_last_ts") or 0),
+                "status": auto_sync_state.get("archive_scan_status") or "",
+            },
             "db_mtime": db_mtime,
             "db_updated_at": datetime.datetime.fromtimestamp(db_mtime).strftime("%Y-%m-%d %H:%M:%S"),
             "broadcast": get_active_broadcast(page_key=page_key, client_id=client_id),
@@ -2622,16 +2713,17 @@ def api_platform_status():
     hydrate_auto_sync_state_from_db()
     now_ts = int(time.time())
     db = get_all_users()
-    total_users = len(db)
-    seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
-    new_total = total_users - seed_total
+    total_users = sum(1 for _, u in db.items() if is_active_verified_user(u))
+    seed_total = sum(1 for _, u in db.items() if is_seed_user(u))
+    new_total = max(0, total_users - seed_total)
+    former_total = sum(1 for _, u in db.items() if is_formerly_verified_user(u))
 
     day_24_cutoff = now_ts - (24 * 60 * 60)
     day_7_cutoff = now_ts - (7 * 24 * 60 * 60)
-    added_24h = sum(1 for _, u in db.items() if int(u.get("first_seen_ts") or 0) >= day_24_cutoff)
-    added_7d = sum(1 for _, u in db.items() if int(u.get("first_seen_ts") or 0) >= day_7_cutoff)
+    added_24h = sum(1 for _, u in db.items() if is_active_verified_user(u) and int(u.get("first_seen_ts") or 0) >= day_24_cutoff)
+    added_7d = sum(1 for _, u in db.items() if is_active_verified_user(u) and int(u.get("first_seen_ts") or 0) >= day_7_cutoff)
 
-    bought_uids = [str(uid) for uid, u in db.items() if bool(u.get("bought_tag"))]
+    bought_uids = [str(uid) for uid, u in db.items() if is_active_verified_user(u) and bool(u.get("bought_tag"))]
     bought_total = len(bought_uids)
     evidence_counts = get_evidence_counts(bought_uids) if bought_uids else {}
     bought_with_evidence = sum(1 for uid in bought_uids if int(evidence_counts.get(str(uid), 0)) > 0)
@@ -2735,6 +2827,7 @@ def api_platform_status():
                 "total_users": total_users,
                 "seed_users": seed_total,
                 "new_users": new_total,
+                "former_users": former_total,
                 "added_24h": int(added_24h),
                 "added_7d": int(added_7d),
             },
@@ -2778,14 +2871,15 @@ def collector_monitor_data():
     hydrate_auto_sync_state_from_db()
     now_ts = int(time.time())
     db = get_all_users()
-    total = len(db)
-    seed_total = sum(1 for _, u in db.items() if u.get("source") == "Seed List")
-    new_total = total - seed_total
-    bought_total = sum(1 for _, u in db.items() if bool(u.get("bought_tag")))
+    total = sum(1 for _, u in db.items() if is_active_verified_user(u))
+    seed_total = sum(1 for _, u in db.items() if is_seed_user(u))
+    new_total = max(0, total - seed_total)
+    former_total = sum(1 for _, u in db.items() if is_formerly_verified_user(u))
+    bought_total = sum(1 for _, u in db.items() if is_active_verified_user(u) and bool(u.get("bought_tag")))
     frontier = get_frontier_stats()
 
     recent_rows = sorted(
-        db.items(),
+        [(uid, info) for uid, info in db.items() if is_active_verified_user(info)],
         key=lambda x: (int(x[1].get("first_seen_ts") or 0), int(x[0]) if str(x[0]).isdigit() else 0),
         reverse=True,
     )[:12]
@@ -2804,6 +2898,8 @@ def collector_monitor_data():
     aligned_now = now_ts - (now_ts % hour)
     buckets = [0] * 24
     for _, info in db.items():
+        if not is_active_verified_user(info):
+            continue
         ts = int(info.get("first_seen_ts") or 0)
         age = aligned_now - ts
         if 0 <= age < 24 * hour:
@@ -2873,6 +2969,7 @@ def collector_monitor_data():
                 "total_users": total,
                 "seed_users": seed_total,
                 "new_users": new_total,
+                "former_users": former_total,
                 "bought_users": bought_total,
             },
             "frontier": frontier,

@@ -52,13 +52,14 @@
 <section class="live-status slim">
     <p><span class="badge badge-new">ONLINE</span> <strong id="liveMode">Connecting...</strong></p>
     <p id="liveUpdated">Last DB update: checking...</p>
-    <p id="liveTotals">Total: -- | Seed: -- | Newly Added: --</p>
+    <p id="liveTotals">Total: -- | Seed: -- | Newly Added: -- | Formerly Verified: --</p>
 </section>
 <section class="dashboard-strip dashboard-hero">
     <div class="stat-pill">
         <span>Current View</span>
         <strong>
             {% if search_type == 'seed' %}Seed (Matured)
+            {% elif search_type == 'former' %}Formerly Verified
             {% elif search_type == 'database' %}All Users
             {% elif search_type == 'individual' %}Search
             {% else %}Newly Added
@@ -69,6 +70,23 @@
         <span>Result Count</span>
         <strong>{{ total_label }}</strong>
     </div>
+</section>
+<section class="panel verification-audit-panel">
+    <div class="audit-head">
+        <div>
+            <span class="audit-kicker">Verification Audit</span>
+            <strong id="auditStatus">Checking archive scanner...</strong>
+        </div>
+        <span class="badge badge-former" id="auditCount">Formerly Verified: --</span>
+    </div>
+    <div class="audit-progress-row">
+        <span id="auditProgress">Last pass: --/-- checked</span>
+        <span id="auditRemoved">Archived this pass: --</span>
+    </div>
+    <div class="audit-progress-track" aria-hidden="true">
+        <div class="audit-progress-fill" id="auditProgressBar"></div>
+    </div>
+    <p id="auditDetail">Profiles that lose Roblox verification are automatically removed from the live verified lists and archived for reference.</p>
 </section>
 </section>
 
@@ -86,6 +104,7 @@
     <nav class="tabs">
         <button class="tab-btn {% if search_type=='new' %}active{% endif %}" data-type="new">Newly Added</button>
         <button class="tab-btn {% if search_type=='seed' %}active{% endif %}" data-type="seed">Seed (Matured)</button>
+        <button class="tab-btn {% if search_type=='former' %}active{% endif %}" data-type="former">Formerly Verified</button>
         <button class="tab-btn {% if search_type=='database' %}active{% endif %}" data-type="database">All Users</button>
         <button class="tab-btn {% if search_type=='individual' %}active{% endif %}" data-type="individual">Search</button>
     </nav>
@@ -96,12 +115,13 @@
     <div class="quick-help-grid">
         <div><strong>Discovery:</strong> Verified profiles are collected from public Roblox endpoints.</div>
         <div><strong>Classification:</strong> Users are grouped as <em>Newly Added</em> or <em>Seed (Matured)</em>.</div>
-        <div><strong>Review:</strong> Moderator labels and evidence provide extra context on flagged profiles.</div>
+        <div><strong>Archive:</strong> Profiles that lose Roblox verification move into <em>Formerly Verified</em>.</div>
     </div>
     <div class="quick-help-legend">
         <span class="legend-title">Badge Legend:</span>
         <span class="badge badge-new">Newly Added</span>
         <span class="badge badge-seed">Seed List</span>
+        <span class="badge badge-former">Formerly Verified</span>
         <span class="badge badge-manual">Manual Add</span>
         <span class="badge badge-bought">Bought Check</span>
         <span class="badge badge-star shiny">Star Creator</span>
@@ -167,6 +187,7 @@
                     <option value="new" {% if request.args.get('status_filter') == 'new' %}selected{% endif %}>Newly Added</option>
                     <option value="seed" {% if request.args.get('status_filter') == 'seed' %}selected{% endif %}>Seed List</option>
                     <option value="manual" {% if request.args.get('status_filter') == 'manual' %}selected{% endif %}>Manual Add</option>
+                    <option value="former" {% if request.args.get('status_filter') == 'former' %}selected{% endif %}>Formerly Verified</option>
                 </select>
             </label>
             <label>Bought
@@ -254,6 +275,9 @@
         {% elif search_type == 'seed' %}
             <h3>No seed users available right now</h3>
             <p>Profiles move into this tab after the maturation period in collection.</p>
+        {% elif search_type == 'former' %}
+            <h3>No formerly verified users right now</h3>
+            <p>If a profile loses Roblox verification, it will be archived here instead of staying in the live verified database.</p>
         {% else %}
             <h3>No newly added users found</h3>
             <p>Collector may still be scanning. Check the monitor for live progress.</p>
@@ -271,6 +295,8 @@
         <p class="source">
             {% if info.source=='Seed List' %}
             <span class="badge badge-seed">{{ info.source }}</span>
+            {% elif info.source=='Formerly Verified' %}
+            <span class="badge badge-former">{{ info.source }}</span>
             {% else %}
             <span class="badge badge-new">Newly Added</span>
             {% endif %}

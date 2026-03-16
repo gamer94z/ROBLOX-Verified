@@ -6,6 +6,9 @@ import json
 DB_NAME = os.environ.get("DB_PATH", "verified_users.db")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 IS_POSTGRES = DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")
+SEED_STATUS = "Seed List"
+NEW_STATUS = "Newly Added"
+FORMER_STATUS = "Formerly Verified"
 
 if IS_POSTGRES:
     import psycopg2
@@ -698,7 +701,13 @@ def get_evidence_counts(uids):
 def add_or_update_manual_user(uid, username, status="Newly Added", bought_tag=False):
     uid_text = str(uid)
     now_ts = int(time.time())
-    status_text = "Seed List" if str(status).lower().startswith("seed") else "Newly Added"
+    status_lc = str(status).lower()
+    if status_lc.startswith("seed"):
+        status_text = SEED_STATUS
+    elif status_lc.startswith("former"):
+        status_text = FORMER_STATUS
+    else:
+        status_text = NEW_STATUS
     bought = 1 if bought_tag else 0
     conn = get_connection()
     cur = conn.cursor()
@@ -746,6 +755,32 @@ def remove_user(uid):
     conn.commit()
     conn.close()
     return deleted_users > 0
+
+
+def archive_formerly_verified(uids, protected_uids=None):
+    valid = [str(uid) for uid in uids if str(uid).isdigit()]
+    protected = {str(uid) for uid in (protected_uids or []) if str(uid).isdigit()}
+    target_ids = [uid for uid in valid if uid not in protected]
+    if not target_ids:
+        return 0
+
+    conn = get_connection()
+    cur = conn.cursor()
+    p = _placeholder()
+    placeholders = ",".join(p for _ in target_ids)
+    cur.execute(
+        f"""
+        UPDATE users
+        SET status={p}
+        WHERE user_id IN ({placeholders})
+          AND status <> {p}
+        """,
+        [FORMER_STATUS, *target_ids, FORMER_STATUS],
+    )
+    changed = int(cur.rowcount or 0)
+    conn.commit()
+    conn.close()
+    return changed
 
 
 def add_admin_log(action, target_uid="", detail=""):

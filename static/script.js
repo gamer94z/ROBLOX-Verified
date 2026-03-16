@@ -31,6 +31,18 @@ let breachHideTimer = null;
 let pendingAutoReload = false;
 const compareSelection = [];
 
+function sourceBadgeClass(source) {
+    if (source === "Seed List") return "badge-seed";
+    if (source === "Formerly Verified") return "badge-former";
+    return "badge-new";
+}
+
+function sourceBadgeLabel(source) {
+    if (source === "Seed List") return "Seed List";
+    if (source === "Formerly Verified") return "Formerly Verified";
+    return "Newly Added";
+}
+
 function isUiBusyForReload() {
     const activeModal = document.querySelector(".modal.show");
     const evidenceOpen = !!(evidenceOverlay && !evidenceOverlay.classList.contains("hidden"));
@@ -495,7 +507,7 @@ function fetchUserModalAsync(uid) {
 
 function compareSlotHtml(data, uid) {
     if (!data) return `<div class="compare-col"><div class="compare-empty">Unable to load profile ${uid}.</div></div>`;
-    const srcBadge = data.stored?.source === "Seed List" ? "Seed List" : "Newly Added";
+    const srcBadge = sourceBadgeLabel(data.stored?.source);
     const bought = data.stored?.bought_tag ? '<span class="compare-pill">Bought Check</span>' : "";
     const star = data.is_star_creator ? '<span class="compare-pill">Star Creator</span>' : "";
     const manual = data.stored?.manual_add ? '<span class="compare-pill">Manual Add</span>' : "";
@@ -1054,7 +1066,7 @@ function setupCardModal(card, uid) {
             }
 
             const sourceHTML = `
-                ${data.stored.source === "Seed List" ? `<span class="badge badge-seed">${data.stored.source}</span>` : `<span class="badge badge-new">Newly Added</span>`}
+                <span class="badge ${sourceBadgeClass(data.stored?.source)}">${sourceBadgeLabel(data.stored?.source)}</span>
                 ${data.stored?.manual_add ? '<span class="badge badge-manual">Manual Add</span>' : ''}
                 ${data.is_star_creator ? '<span class="badge badge-star shiny">Star Creator</span>' : ''}
                 ${data.stored?.bought_tag ? '<span class="badge badge-bought">Bought Check</span>' : ''}
@@ -1314,11 +1326,48 @@ async function pollLiveStatus() {
         const modeEl = document.getElementById("liveMode");
         const updatedEl = document.getElementById("liveUpdated");
         const totalsEl = document.getElementById("liveTotals");
+        const auditStatusEl = document.getElementById("auditStatus");
+        const auditCountEl = document.getElementById("auditCount");
+        const auditProgressEl = document.getElementById("auditProgress");
+        const auditRemovedEl = document.getElementById("auditRemoved");
+        const auditProgressBarEl = document.getElementById("auditProgressBar");
+        const auditDetailEl = document.getElementById("auditDetail");
+        const archiveScan = status.archive_scan || {};
+        const archiveChecked = Number(archiveScan.checked || 0);
+        const archiveTotal = Number(archiveScan.total || 0);
+        const archiveRemoved = Number(archiveScan.removed || 0);
+        const archivePercent = archiveTotal > 0 ? Math.max(0, Math.min(100, Math.round((archiveChecked / archiveTotal) * 100))) : 0;
+        const archiveLastText = archiveScan.last_ts
+            ? new Date(Number(archiveScan.last_ts) * 1000).toLocaleTimeString()
+            : "awaiting first scan";
 
         if (modeEl) modeEl.innerText = status.database_mode;
         if (updatedEl) updatedEl.innerText = `Last DB update: ${status.db_updated_at}`;
         if (totalsEl) {
-            totalsEl.innerText = `Total: ${status.total_users} | Seed: ${status.seed_users} | Newly Added: ${status.new_users}`;
+            totalsEl.innerText = `Total: ${status.total_users} | Seed: ${status.seed_users} | Newly Added: ${status.new_users} | Formerly Verified: ${status.former_users || 0}`;
+        }
+        if (auditStatusEl) {
+            auditStatusEl.innerText = archiveScan.running
+                ? "Archive scanner running"
+                : "Archive scanner standing by";
+        }
+        if (auditCountEl) {
+            auditCountEl.innerText = `Formerly Verified: ${status.former_users || 0}`;
+        }
+        if (auditProgressEl) {
+            auditProgressEl.innerText = archiveTotal > 0
+                ? `Last pass: ${archiveChecked}/${archiveTotal} checked`
+                : "Last pass: awaiting first scan";
+        }
+        if (auditRemovedEl) {
+            auditRemovedEl.innerText = `Archived this pass: ${archiveRemoved}`;
+        }
+        if (auditProgressBarEl) {
+            auditProgressBarEl.style.width = `${archivePercent}%`;
+        }
+        if (auditDetailEl) {
+            const statusText = archiveScan.status || "Profiles that lose Roblox verification are automatically archived.";
+            auditDetailEl.innerText = `${statusText}. Last pass ${archiveLastText}.`;
         }
 
         if (lastDbMtime !== null && status.db_mtime !== lastDbMtime) {

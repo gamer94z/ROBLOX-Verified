@@ -685,6 +685,7 @@ body.main-app.dark-mode .policy-article-card p {
 .badge:hover { transform: scale(1.05); box-shadow:0 0 6px rgba(0,0,0,0.2); }
 .badge-seed { background-color:#facc15; color:black; font-weight:700; }
 .badge-new { background-color:#10b981; color:white; font-weight:700; }
+.badge-former { background: linear-gradient(135deg, #334155, #64748b); color: #f8fafc; font-weight: 700; border: 1px solid rgba(255,255,255,0.28); }
 .badge-star { background-color:#f97316; color:white; font-weight:700; }
 .badge-manual { background: linear-gradient(135deg, #065f46, #14b8a6); color: #ecfeff; font-weight: 700; border: 1px solid rgba(255,255,255,0.35); }
 .badge-bought { background: linear-gradient(135deg, #7f1d1d, #ef4444); color: #fff; font-weight: 700; border: 1px solid rgba(255,255,255,0.35); }
@@ -801,7 +802,7 @@ body.main-app.dark-mode .profile-grid div {
     border-color: #334155;
 }
 
-.evidence-overlay { position:fixed; inset:0; background:rgba(2,6,23,0.76); z-index:290; display:grid; place-items:center; padding:1rem; }
+.evidence-overlay { position:fixed; inset:0; background:rgba(2,6,23,0.76); z-index:1600; display:grid; place-items:center; padding:1rem; }
 .evidence-overlay.hidden { display:none; }
 .evidence-panel { width:min(760px,94vw); max-height:84vh; overflow:auto; border:1px solid #334155; border-radius:14px; background:linear-gradient(165deg, rgba(15,23,42,0.96), rgba(2,6,23,0.96)); box-shadow:0 24px 58px rgba(2,6,23,0.56); padding:0.9rem; transform:translateY(14px) scale(0.98); opacity:0; animation:evidenceIn 220ms ease-out forwards; }
 .evidence-close { float:right; border:1px solid #334155; background:#0b1220; color:#dbeafe; border-radius:8px; width:32px; height:32px; cursor:pointer; }
@@ -1274,6 +1275,7 @@ body.dark-mode .avatar-shell .avatar-spinner {
 }
 body.dark-mode .badge-seed { background:#facc15; color:black; }
 body.dark-mode .badge-new { background:#10b981; color:white; }
+body.dark-mode .badge-former { background: linear-gradient(135deg, #334155, #475569); color:#f8fafc; }
 body.dark-mode .badge-manual { background: linear-gradient(135deg, #064e3b, #0f766e); color:#ecfeff; }
 body.dark-mode .badge-star { background:#f97316; color:white; }
 body.dark-mode .modal-content { background-color:#1f2937; color:white; }
@@ -1970,6 +1972,76 @@ body.main-app .dashboard-strip.dashboard-hero .stat-pill {
     justify-content: center;
 }
 
+body.main-app .verification-audit-panel {
+    grid-column: 1 / -1;
+    margin: 0;
+    border-radius: 14px;
+    padding: 0.82rem 0.9rem;
+    border: 1px solid #cbd5e1;
+    background:
+        radial-gradient(circle at 85% 18%, rgba(100, 116, 139, 0.12), transparent 34%),
+        radial-gradient(circle at 14% 82%, rgba(37, 99, 235, 0.1), transparent 38%),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.95));
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
+}
+
+body.main-app .verification-audit-panel .audit-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 0.35rem;
+}
+
+body.main-app .verification-audit-panel .audit-kicker {
+    display: block;
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 0.12rem;
+}
+
+body.main-app .verification-audit-panel strong {
+    color: #0f172a;
+    font-size: 1rem;
+}
+
+body.main-app .verification-audit-panel p {
+    margin: 0;
+    color: #334155;
+    font-size: 0.83rem;
+    line-height: 1.45;
+}
+
+body.main-app .verification-audit-panel .audit-progress-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 0 0 0.5rem;
+    color: #475569;
+    font-size: 0.77rem;
+}
+
+body.main-app .verification-audit-panel .audit-progress-track {
+    width: 100%;
+    height: 8px;
+    margin: 0 0 0.55rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(148, 163, 184, 0.2);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+body.main-app .verification-audit-panel .audit-progress-fill {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #64748b, #94a3b8);
+    transition: width 0.35s ease;
+}
+
 body.main-app .tabs-shell {
     max-width: none;
     border-radius: 14px;
@@ -2022,6 +2094,40 @@ body.main-app.dark-mode .index-top-stack .live-status.slim {
     box-shadow:
         0 22px 40px rgba(2, 6, 23, 0.56),
         inset 0 1px 0 rgba(59, 130, 246, 0.22);
+}
+
+body.main-app.dark-mode .verification-audit-panel {
+    border-color: #334155;
+    background:
+        radial-gradient(circle at 85% 18%, rgba(100, 116, 139, 0.16), transparent 34%),
+        radial-gradient(circle at 14% 82%, rgba(37, 99, 235, 0.16), transparent 38%),
+        linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(2, 6, 23, 0.94));
+    box-shadow: 0 16px 34px rgba(2, 6, 23, 0.44);
+}
+
+body.main-app.dark-mode .verification-audit-panel .audit-kicker {
+    color: #94a3b8;
+}
+
+body.main-app.dark-mode .verification-audit-panel strong {
+    color: #e2e8f0;
+}
+
+body.main-app.dark-mode .verification-audit-panel p {
+    color: #cbd5e1;
+}
+
+body.main-app.dark-mode .verification-audit-panel .audit-progress-row {
+    color: #cbd5e1;
+}
+
+body.main-app.dark-mode .verification-audit-panel .audit-progress-track {
+    background: rgba(15, 23, 42, 0.72);
+    border-color: rgba(96, 165, 250, 0.2);
+}
+
+body.main-app.dark-mode .verification-audit-panel .audit-progress-fill {
+    background: linear-gradient(90deg, #38bdf8, #34d399);
 }
 
 body.main-app.dark-mode .index-top-stack .live-status.slim::before {

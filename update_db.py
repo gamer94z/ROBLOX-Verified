@@ -1,6 +1,14 @@
 import re
 import time
-from database import init_db, DB_NAME, IS_POSTGRES, get_connection
+from database import (
+    init_db,
+    DB_NAME,
+    IS_POSTGRES,
+    get_connection,
+    SEED_STATUS,
+    NEW_STATUS,
+    FORMER_STATUS,
+)
 
 TXT_FILE = "verified_users.txt"
 DB_FILE = DB_NAME
@@ -58,18 +66,18 @@ def load_existing(conn):
 
 
 def determine_status(raw_source, existing_row, now_ts):
-    if raw_source == "Seed List":
-        return "Seed List"
+    if raw_source == SEED_STATUS:
+        return SEED_STATUS
 
     if existing_row:
-        if existing_row["status"] == "Seed List":
-            return "Seed List"
+        if existing_row["status"] == SEED_STATUS:
+            return SEED_STATUS
 
         age = now_ts - int(existing_row["first_seen_ts"])
         if age >= PROMOTION_SECONDS:
-            return "Seed List"
+            return SEED_STATUS
 
-    return "Newly Added"
+    return NEW_STATUS
 
 
 def sync_database(parsed_rows):
@@ -114,15 +122,18 @@ def sync_database(parsed_rows):
 
         cur.execute("SELECT COUNT(*) FROM users")
         total = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM users WHERE status='Seed List'")
+        cur.execute(f"SELECT COUNT(*) FROM users WHERE status='{SEED_STATUS}'")
         seed_total = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM users WHERE status='Newly Added'")
+        cur.execute(f"SELECT COUNT(*) FROM users WHERE status='{NEW_STATUS}'")
         new_total = cur.fetchone()[0]
+        cur.execute(f"SELECT COUNT(*) FROM users WHERE status='{FORMER_STATUS}'")
+        former_total = cur.fetchone()[0]
 
         print("Database sync complete.")
         print(f"Total users: {total}")
         print(f"Seed List users: {seed_total}")
         print(f"Newly Added users: {new_total}")
+        print(f"Formerly Verified users: {former_total}")
     finally:
         conn.close()
 

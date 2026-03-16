@@ -245,7 +245,7 @@ header p {
 
 .metric-row {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.6rem;
     margin-top: 0.72rem;
     position: relative;
@@ -1226,6 +1226,10 @@ footer {
             <span class="label">Newly Added</span>
             <span class="value" id="metricNew">--</span>
         </div>
+        <div class="metric">
+            <span class="label">Formerly Verified</span>
+            <span class="value" id="metricFormer">--</span>
+        </div>
     </div>
     <div class="telemetry-strip">
         <div class="telemetry-pill">
@@ -1329,6 +1333,7 @@ footer {
                 <div class="notes-item"><span class="k">Collector Status</span><span class="v" id="noteCollectorStatus">Checking...</span></div>
                 <div class="notes-item"><span class="k">Database Mode</span><span class="v" id="noteDbMode">Checking...</span></div>
                 <div class="notes-item"><span class="k">Last Sync</span><span class="v" id="noteLastSync">Checking...</span></div>
+                <div class="notes-item"><span class="k">Archive Watch</span><span class="v" id="noteFormerCount">Checking...</span></div>
                 <div class="notes-item"><span class="k">Data Source</span><span class="v">Public Roblox API endpoints</span></div>
             </div>
         </section>
@@ -1652,6 +1657,7 @@ function updateLiveStatus() {
             const totalEl = document.getElementById("metricTotal");
             const seedEl = document.getElementById("metricSeed");
             const newEl = document.getElementById("metricNew");
+            const formerEl = document.getElementById("metricFormer");
             const healthEl = document.getElementById("telemetryHealth");
             const refreshEl = document.getElementById("telemetryRefresh");
             const mixText = document.getElementById("telemetryMixText");
@@ -1661,12 +1667,18 @@ function updateLiveStatus() {
             const noteCollectorStatus = document.getElementById("noteCollectorStatus");
             const noteDbMode = document.getElementById("noteDbMode");
             const noteLastSync = document.getElementById("noteLastSync");
+            const noteFormerCount = document.getElementById("noteFormerCount");
+            const archiveScan = status.archive_scan || {};
+            const archiveChecked = Number(archiveScan.checked || 0);
+            const archiveTotal = Number(archiveScan.total || 0);
+            const archiveRemoved = Number(archiveScan.removed || 0);
 
             if (modeEl) modeEl.innerText = status.database_mode;
             if (updatedEl) updatedEl.innerText = `Last DB update: ${status.db_updated_at}`;
             if (totalEl) setMetricValueAnimated(totalEl, status.total_users);
             if (seedEl) setMetricValueAnimated(seedEl, status.seed_users);
             if (newEl) setMetricValueAnimated(newEl, status.new_users);
+            if (formerEl) setMetricValueAnimated(formerEl, status.former_users || 0);
             if (healthEl) {
                 healthEl.innerText = String(status.database_mode || "").toLowerCase().includes("postgres")
                     ? "Online • Persistent"
@@ -1684,14 +1696,20 @@ function updateLiveStatus() {
             }
             if (noteDbMode) noteDbMode.innerText = status.database_mode || "Unknown";
             if (noteLastSync) noteLastSync.innerText = status.db_updated_at || "Unknown";
+            if (noteFormerCount) {
+                if (archiveTotal > 0) {
+                    noteFormerCount.innerText = `${archiveChecked}/${archiveTotal} checked • ${archiveRemoved} archived`;
+                } else {
+                    noteFormerCount.innerText = `${Number(status.former_users || 0).toLocaleString()} archived`;
+                }
+            }
 
             const total = Number(status.total_users || 0);
             const seed = Number(status.seed_users || 0);
-            const fresh = Number(status.new_users || 0);
             const seedPctRaw = total > 0 ? (seed / total) * 100 : 0;
             const seedPct = Math.max(0, Math.min(100, Math.round(seedPctRaw)));
             const newPct = Math.max(0, 100 - seedPct);
-            if (mixText) mixText.innerText = `Seed ${seedPct}% • New ${newPct}%`;
+            if (mixText) mixText.innerText = `Seed ${seedPct}% • New ${newPct}% • Archived ${Number(status.former_users || 0)}`;
             if (seedBar) seedBar.style.width = `${seedPct}%`;
             if (newBar) newBar.style.width = `${newPct}%`;
 
